@@ -1,0 +1,35 @@
+# Personal planning and session context remain local.
+/docs/
+/research/
+/review/
+/.agents/
+/.codex/
+/.superpowers/
+/.eagle-mem/
+/.nexus/
+
+# Generated and machine-local files.
+.DS_Store
+.build/
+.swiftpm/
+target/
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+*.log
+__pycache__/
+*.pyc
+
+# Recognition data and model binaries.
+/evidence/
+/models/
+*.wav
+*.mp3
+*.m4a
+*.flac
+*.gguf
+*.ggml
+*.onnx
+*.safetensors

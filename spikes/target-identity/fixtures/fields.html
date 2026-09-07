@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Logia target-identity fixture</title>
+<style>body{font:18px system-ui;max-width:42rem;margin:4rem auto;padding:0 1rem}label{display:block;margin:1rem 0}input,button{font:inherit;padding:.5rem}input{display:block;width:90%}button{margin:.4rem .4rem .4rem 0}:focus-visible{outline:3px solid #735000;outline-offset:3px}</style>
+<h1>Target-identity fixture</h1>
+<p>Synthetic fields for manual observations. This page has no network requests or storage.</p>
+<label>First field <input id="first" value="Synthetic first field"></label>
+<label>Second field <input id="second" value="Synthetic second field"></label>
+<button id="replace">Recreate first field and focus it</button>
+<button id="remove">Remove first field</button>
+<p id="status" role="status">Ready.</p>
+<script>
+document.getElementById('replace').onclick=()=>{
+  const old=document.getElementById('first');
+  if(!old)return;
+  const replacement=old.cloneNode(true);
+  replacement.value=old.value;
+  old.replaceWith(replacement);replacement.focus();
+  document.getElementById('status').textContent='New DOM element; same visible content.';
+};
+document.getElementById('remove').onclick=()=>{
+  document.getElementById('first')?.remove();
+  document.getElementById('status').textContent='First field removed. Reload to restore.';
+};
+</script>
+</html>
