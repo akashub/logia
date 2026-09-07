@@ -23,7 +23,10 @@ fn wire(json: &[u8]) -> Vec<u8> {
 fn versioned_control_and_event_roundtrip() {
     for message in [
         Message::Control(Control::Start { session: 8 }),
-        Message::Control(Control::Finish { session: 8 }),
+        Message::Control(Control::Finish {
+            session: 8,
+            frames: 2,
+        }),
         Message::Control(Control::Cancel { session: 8 }),
         Message::Event(partial(8, 1, "hello", " there")),
         Message::Event(Event::ModelReady {}),
@@ -40,13 +43,13 @@ fn versioned_control_and_event_roundtrip() {
 
 #[test]
 fn malformed_wire_is_rejected_without_content_in_error() {
-    for bytes in [vec![1, 0], wire(b"{"), wire(br#"{"version":2,"message":{"kind":"event","value":{"type":"model_ready"}}}"#), wire(br#"{"version":1,"message":{"kind":"event","value":{"type":"invented","text":"private"}}}"#)] {
+    for bytes in [vec![1, 0], wire(b"{"), wire(br#"{"version":3,"message":{"kind":"event","value":{"type":"model_ready"}}}"#), wire(br#"{"version":2,"message":{"kind":"event","value":{"type":"invented","text":"private"}}}"#)] {
         let error = read_message(&mut Cursor::new(bytes)).unwrap_err();
         assert!(!format!("{error:?}").contains("private"));
     }
     assert_eq!(
         read_message(&mut Cursor::new(wire(
-            br#"{"version":2,"message":{"kind":"event","value":{"type":"model_ready"}}}"#
+            br#"{"version":3,"message":{"kind":"event","value":{"type":"model_ready"}}}"#
         ))),
         Err(ProtocolError::UnsupportedVersion)
     );
@@ -255,7 +258,7 @@ fn preview_has_one_active_and_only_newest_pending() {
 fn mutated_binary_declarations_and_samples_are_rejected() {
     let mut valid = Vec::new();
     write_audio(&mut valid, &pcm(0, 320, false)).unwrap();
-    for (offset, replacement) in [(4, 2), (22, 0), (26, 2), (27, 2), (28, 0)] {
+    for (offset, replacement) in [(4, 3), (22, 0), (26, 2), (27, 2), (28, 0)] {
         let mut bytes = valid.clone();
         bytes[offset] = replacement;
         assert!(
@@ -313,7 +316,46 @@ fn metadata_exact_cap_and_strict_schema() {
         read_message(&mut Cursor::new(wire(&padded))).unwrap(),
         Some(message)
     );
-    for json in [br#"{"version":1,"message":{"kind":"event","value":{"type":"model_ready","extra":true}}}"#.as_slice(),br#"{"version":1,"message":{"kind":"event","value":{"type":"failed","session":8,"code":"private"}}}"#] {
+    for json in [br#"{"version":2,"message":{"kind":"event","value":{"type":"model_ready","extra":true}}}"#.as_slice(),br#"{"version":2,"message":{"kind":"event","value":{"type":"failed","session":8,"code":"private"}}}"#] {
         assert_eq!(read_message(&mut Cursor::new(wire(json))),Err(ProtocolError::InvalidPayload));
     }
+}
+
+#[test]
+fn finish_requires_an_explicit_unsigned_frame_count() {
+    for fields in [
+        "",
+        ",\"frames\":-1",
+        ",\"frames\":1.5",
+        ",\"frames\":18446744073709551616",
+    ] {
+        let json = format!(
+            r#"{{"version":2,"message":{{"kind":"control","value":{{"type":"finish","session":8{fields}}}}}}}"#
+        );
+        assert_eq!(
+            read_message(&mut Cursor::new(wire(json.as_bytes()))),
+            Err(ProtocolError::InvalidPayload)
+        );
+    }
+}
+
+#[test]
+fn previous_wire_version_cannot_silently_use_new_completion_contract() {
+    assert_eq!(
+        read_message(&mut Cursor::new(wire(
+            br#"{"version":1,"message":{"kind":"control","value":{"type":"finish","session":8}}}"#
+        ))),
+        Err(ProtocolError::InvalidPayload)
+    );
+    assert_eq!(
+        read_message(&mut Cursor::new(wire(br#"{"version":1,"message":{"kind":"control","value":{"type":"finish","session":8,"frames":0}}}"#))),
+        Err(ProtocolError::UnsupportedVersion)
+    );
+    let mut bytes = Vec::new();
+    write_audio(&mut bytes, &pcm(0, 320, true)).unwrap();
+    bytes[4..6].copy_from_slice(&1u16.to_le_bytes());
+    assert_eq!(
+        read_audio(&mut Cursor::new(bytes)),
+        Err(ProtocolError::UnsupportedVersion)
+    );
 }

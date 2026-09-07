@@ -2,7 +2,48 @@
 
 Local voice dictation for the desktop, with live captions and careful delivery to the intended text field.
 
-**Early development:** implemented experiments include a read-only macOS target-identity probe and bounded Rust recognition transport. There is no dictation application or running recognizer yet. Windows and Linux desktop support is planned; it has not been validated.
+**Personal preview:** a macOS app now records English speech, shows real live captions, and lets you edit and copy the final text. Recognition runs locally in an owned worker process. Windows and Linux desktop support remains planned and unvalidated.
+
+## Run the app
+
+Requirements: macOS 14+, Apple developer tools, Rust, CMake, Node.js, and pnpm. The current native build has been checked on Apple Silicon.
+
+```sh
+cd apps/desktop
+pnpm install --frozen-lockfile
+pnpm tauri dev
+```
+
+Download the English model in the app once (199 MB), then choose **Start recording**. Grant Microphone permission when macOS asks. **Stop recording** finishes the text; **Cancel** discards it and terminates recognition. Edit the result and choose **Copy text**. Command–Enter starts/stops recording while this window is focused.
+
+Build a standalone local app with `pnpm tauri build --debug --bundles app`. It appears at `src-tauri/target/debug/bundle/macos/Logia.app`. The native inference library remains optimized in this debug preview. A signing identity is not configured for public distribution.
+
+The preview supports passages up to 60 seconds, keeps no transcript history, and saves no recordings. Captions can revise until finalization; recognition errors can still occur. The model download uses a pinned revision and verified SHA-256. After download, recognition requires no network connection.
+
+The breathing caption element currently lives inside the main window. A separate floating overlay, global shortcut, verified insertion into other applications, history, and other language models are later work.
+
+```mermaid
+flowchart LR
+    UI[Record / Stop / Cancel] --> Parent[Tauri application]
+    Parent -->|owned process + control pipe| Worker[Recognition worker]
+    Mic[Microphone capture thread] -->|bounded mono audio queue| Worker
+    Worker --> Resample[16 kHz conversion]
+    Resample --> Model[Local Moonshine streaming model]
+    Model -->|partial / final events| Parent
+    Parent --> Caption[Live captions and editable text]
+    Caption -->|user chooses Copy| Clipboard[Clipboard]
+```
+
+Stop cuts off capture independently of inference and drains queued audio. Cancel invalidates the session before killing and reaping its worker. A replacement cannot start until the previous worker exits. The model loads per recording in this preview.
+
+Checks, from the repository root:
+
+```sh
+cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --locked
+cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --locked --all-targets -- -D warnings
+```
+
+For browser interaction checks, run `pnpm dev` in `apps/desktop`, then `pnpm exec playwright install chromium` and `pnpm test:ui` in another terminal there. These simulate native events to test the UI contract; they do not test recognition quality. A developer can separately run the native executable with `--recognizer MODEL.gguf TEST.wav` on a non-sensitive 16-bit PCM WAV, up to 60 seconds. That explicit test mode writes recognition events to stdout; it never opens a microphone.
 
 ## Target-identity probe
 
@@ -42,7 +83,7 @@ Capture failures include their stage and Accessibility error code. Missing subro
 
 ## Recognition transport
 
-`spikes/recognition` contains versioned bounded messages, PCM framing, a bounded audio queue, stale-result rejection, and preview coalescing. These are transport primitives; process supervision and engine integration are still being built.
+`spikes/recognition` contains versioned bounded messages, PCM framing, a bounded audio queue, stale-result rejection, preview coalescing, and an exact consumed-frame completion barrier. These experimental transport primitives are separate from the app's current capture-in-worker implementation.
 
 ```sh
 cargo test --manifest-path spikes/recognition/Cargo.toml --locked
@@ -51,8 +92,8 @@ cargo clippy --manifest-path spikes/recognition/Cargo.toml --locked --all-target
 
 ## Direction
 
-1. Establish field-identity limits and a bounded, cancelable recognition worker.
-2. Build a macOS personal preview with genuine live captions and explicit recovery.
-3. Add local beta features, then validate Windows and Linux desktop integrations.
+1. Try the Mac recording/captions/copy loop and improve actual microphone behavior.
+2. Add the floating overlay, global shortcut, and delivery with verified target identity.
+3. Add opt-in local history and beta features, then validate Windows and Linux integrations.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development and data-handling rules.

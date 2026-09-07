@@ -1,6 +1,6 @@
 # Working on Logia
 
-Logia is implementing its feasibility foundation. Execute agreed work continuously: build, test, review, fix, and document outcomes. Pause for material direction changes, necessary user input/access, or destructive actions. Do not reopen settled decisions at routine task boundaries.
+Logia has a macOS recording/captions/copy preview. Prioritize usable product increments over extending experiments. Execute agreed work continuously: build, test, review, fix, and document outcomes. Pause for material direction changes, necessary user input/access, or destructive actions. Do not reopen settled decisions at routine task boundaries.
 
 ## Product invariants
 

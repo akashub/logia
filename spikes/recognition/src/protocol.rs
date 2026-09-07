@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::io::{self, Read, Write};
 
 pub type SessionId = u64;
-pub const VERSION: u16 = 1;
+pub const VERSION: u16 = 2;
 pub const MAX_PAYLOAD: usize = 65_536;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,7 +18,7 @@ pub enum ProtocolError {
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Control {
     Start { session: SessionId },
-    Finish { session: SessionId },
+    Finish { session: SessionId, frames: u64 },
     Cancel { session: SessionId },
 }
 
