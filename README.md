@@ -20,7 +20,7 @@ Build a standalone local app with `pnpm tauri build --debug --bundles app`. It a
 
 The preview supports passages up to 60 seconds, keeps no transcript history, and saves no recordings. Captions can revise until finalization; recognition errors can still occur. The model download uses a pinned revision and verified SHA-256. After download, recognition requires no network connection.
 
-The breathing caption element currently lives inside the main window. A separate floating overlay, global shortcut, verified insertion into other applications, history, and other language models are later work.
+The main window shows one persistent paragraph while recording, through pauses, and after Stop. Received words appear progressively within 140 ms; corrections update in place, and final text appears immediately. Reduced-motion preferences disable that pacing. Long passages follow the latest words until you scroll back; choose **Follow latest words** to resume following. A separate floating overlay, global shortcut, verified insertion into other applications, history, and other language models are later work.
 
 ```mermaid
 flowchart LR
@@ -43,7 +43,7 @@ cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --locked
 cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --locked --all-targets -- -D warnings
 ```
 
-For browser interaction checks, run `pnpm dev` in `apps/desktop`, then `pnpm exec playwright install chromium` and `pnpm test:ui` in another terminal there. These simulate native events to test the UI contract; they do not test recognition quality. A developer can separately run the native executable with `--recognizer MODEL.gguf TEST.wav` on a non-sensitive 16-bit PCM WAV, up to 60 seconds. That explicit test mode writes recognition events to stdout; it never opens a microphone.
+For browser interaction checks, run `pnpm dev` in `apps/desktop`, then `pnpm exec playwright install chromium` and `pnpm test:ui` in another terminal there. Run `pnpm test:transcript` with Node.js 24+ for deterministic presentation checks. These test the UI contract; they do not test recognition quality. A developer can separately run the native executable with `--recognizer MODEL.gguf TEST.wav` on a non-sensitive 16-bit PCM WAV, up to 60 seconds. That explicit test mode writes recognition events to stdout; it never opens a microphone.
 
 ## Target-identity probe
 

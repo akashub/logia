@@ -6,6 +6,7 @@ Logia has a macOS recording/captions/copy preview. Prioritize usable product inc
 
 - Local dictation is the core workflow. macOS, Windows, and Linux are intended targets; report actual build and desktop-test coverage separately.
 - Real live captions are required in the first personal preview.
+- Keep the full paragraph visible during pauses and after Stop. The user's microphone feedback supersedes the earlier collapsing in-window bubble. Presentation may pace received words briefly, but must never invent text or delay authoritative finalization/cancellation.
 - Verify the intended application, window, and field before insertion. Unknown identity means copy-only. Never auto-submit or blindly retry uncertain insertion.
 - One resident recognizer and one active inference worker. Bound audio storage, inference queues, and preview work.
 - Cancel must stop owned inference. Reject stale results and reap a worker before starting its replacement.

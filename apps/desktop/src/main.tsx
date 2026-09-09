@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { TranscriptEditor } from './transcript-editor';
 import '@fontsource/archivo/400.css';
 import '@fontsource/archivo/500.css';
 import '@fontsource/newsreader/400.css';
@@ -21,7 +22,6 @@ function App() {
   const [complete, setComplete] = useState(false);
   const [dark, setDark] = useState(false);
   const generation = useRef(0);
-  const captionElement = useRef<HTMLSpanElement>(null);
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
   const active = ['loading','recording','finishing','canceling'].includes(phase);
@@ -38,7 +38,9 @@ function App() {
         if (phaseRef.current === 'canceling' && event.type !== 'stopped') return;
         if (event.type === 'loading') setPhase('loading');
         if (event.type === 'listening') { setPhase('recording'); setSeconds(0); }
-        if (event.type === 'partial') setText(event.text ?? '');
+        // Empty interim snapshots do not retract the visible paragraph.
+        // An authoritative final (including an empty final) still replaces it.
+        if (event.type === 'partial' && event.text?.trim()) setText(event.text);
         if (event.type === 'final') { setText(event.text ?? ''); setComplete(true); setPhase('finishing'); }
         if (event.type === 'error') setError(event.message ?? 'Recognition stopped. Try again.');
         if (event.type === 'stopped') setPhase('ready');
@@ -60,7 +62,6 @@ function App() {
   }, [phase]);
   useEffect(() => { if (phase === 'recording' && seconds >= 60) void stop(); }, [seconds, phase]);
   useEffect(() => { document.documentElement.dataset.theme = dark ? 'dark' : 'light'; }, [dark]);
-  useEffect(() => { if (captionElement.current) captionElement.current.scrollTop = captionElement.current.scrollHeight; }, [text]);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
@@ -99,25 +100,21 @@ function App() {
     try { await invoke('plugin:clipboard-manager|write_text', { text }); setCopied(true); }
     catch { setError('Could not copy. Select the text and use your usual copy shortcut.'); }
   }
-  const caption = text || (phase === 'recording' ? 'Listening for your words…' : '');
   const status = phase === 'recording' ? 'Listening' : phase === 'loading' ? 'Preparing' : phase === 'finishing' ? 'Finishing' : phase === 'canceling' ? 'Stopping' : complete && text ? 'Ready to use' : 'Ready when you are';
   const setup = ['setup','downloading','checking'].includes(phase);
 
   return <main>
     <header><div className="wordmark"><span className="brand-pip"/>Logia</div><div className="header-actions"><span>Personal preview</span><button className="quiet" onClick={() => setDark(!dark)}>{dark ? 'Light' : 'Dark'}</button></div></header>
-    <section className="intro"><h1>Room for your words.</h1><p>Speak naturally. Keep the thought moving.</p></section>
+    <section className="intro"><h1>Room for your words.</h1><p>Take your time. There’s room for the whole thought.</p></section>
     {setup ? <section className="setup" aria-labelledby="setup-title">
       <span className="setup-mark" aria-hidden="true">a</span>
       <div><h2 id="setup-title">A voice of your own.</h2><p>Download the English model once. After that, your speech is transcribed on this device.</p>
       {native ? <button className="primary" disabled={phase !== 'setup'} onClick={() => void download()}>{phase === 'checking' ? 'Checking model…' : phase === 'downloading' ? `Downloading · ${progress}%` : 'Download English model'}</button> : <p className="browser-note">Open the Logia desktop app to record. This browser view cannot access the recognizer.</p>}
       <small>{phase === 'downloading' ? 'You can leave this window open while it downloads.' : '199 MB · no account needed'}</small></div>
     </section> : <section className="workspace" aria-label="Dictation">
-      <div className="workspace-heading"><span>{complete && text ? 'Your words' : 'A little space to think'}</span><span className="status-label">{status}</span></div>
-      <textarea aria-label="Transcript" spellCheck value={text} readOnly={active} onChange={event => { setText(event.target.value); setCopied(false); }} placeholder="A first thought. A message. A bit of code. Start recording and let the words come." />
-      <div className={`breathing ${phase === 'recording' && text ? 'speaking' : active ? 'armed' : 'rest'}`} aria-label={status}>
-        <span className={`pip ${active ? 'live' : ''}`}/>
-        {active && <>{phase === 'recording' && text ? <span className="caption" ref={captionElement}>{caption}</span> : <span className="overlay-label">{status}</span>}<span className="clock">{phase === 'recording' ? `0:${String(seconds).padStart(2,'0')}` : ''}</span></>}
-      </div>
+      <div className="workspace-heading"><span>Your words</span><span className={`status-label ${active ? 'is-active' : ''}`} role="status"><span className="status-dot"/>{status}<span className="clock">{active ? `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2,'0')}` : ''}</span></span></div>
+      <TranscriptEditor text={text} active={active} streaming={(phase === 'recording' || phase === 'finishing') && !complete} onChange={value => { setText(value); setCopied(false); }} />
+      <div className="session-note">{phase === 'recording' ? 'Pauses are welcome. Recording continues until you choose Stop or reach 60 seconds.' : phase === 'finishing' ? 'Finishing the last words. Your paragraph stays here.' : complete && text ? 'Ready to edit and copy. Your paragraph stays until you clear it or start again.' : 'Your whole paragraph appears here, with room to pause and think.'}</div>
       <div className="controls"><div><button className="quiet" disabled={!text || active} onClick={() => { setText(''); setComplete(false); }}>Clear</button><button className="copy" disabled={!text || active} onClick={() => void copy()}>{copied ? 'Copied' : complete ? 'Copy text' : 'Copy partial'}</button></div>
       <div className="record-actions">{active && <button className="quiet" onClick={() => void cancel()} disabled={phase === 'canceling'}>Cancel</button>}
       <button className={`primary ${phase === 'recording' ? 'recording' : ''}`} disabled={!['ready','recording'].includes(phase)} onClick={() => void (phase === 'recording' ? stop() : start())}><span className="record-icon"/>{phase === 'recording' ? 'Stop recording' : active ? `${status}…` : 'Start recording'}</button></div></div>

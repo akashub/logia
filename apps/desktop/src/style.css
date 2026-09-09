@@ -102,17 +102,17 @@ header {
 textarea {
   display:block;
   resize:none;
-  min-height:230px;
-  height:28vh;
-  max-height:400px;
+  height:clamp(300px, calc(100dvh - 400px), 620px);
+  scrollbar-gutter:stable;
+  overflow-anchor:none;
   width:100%;
   border:0;
   color:var(--ink);
   background:transparent;
-  padding:24px 28px 15px;
+  padding:26px 28px 20px;
   font-family:Newsreader,Georgia,serif;
-  font-size:28px;
-  line-height:1.45}
+  font-size:26px;
+  line-height:1.6}
 textarea::placeholder {
   color:color-mix(in srgb,var(--muted) 58%,var(--panel));
   max-width:30ch}
@@ -121,60 +121,14 @@ textarea:focus {
 textarea:focus-visible {
   outline:2px solid var(--held);
   outline-offset:-5px}
-.breathing {
-  position:relative;
-  display:flex;
-  align-items:center;
-  gap:10px;
-  margin:15px auto 23px;
-  color:#eeeae1;
-  border-radius:14px;
-  background:var(--overlay);
-  transition:width 160ms ease,height 160ms ease;
-  padding:0 15px;
-  width:176px;
-  height:32px;
-  overflow:hidden}
-.breathing.rest {
-  width:14px;
-  height:14px;
-  padding:0;
-  background:transparent;
-  border-radius:50%;
-  margin-top:33px}
-.pip {
-  width:6px;
-  height:6px;
-  border-radius:50%;
-  background:var(--held);
-  flex:none}
-.rest .pip {
-  width:14px;
-  height:14px;
-  background:#83869d;
-  box-shadow:inset 0 0 0 4px var(--panel)}
-.pip.live {
-  background:var(--live);
-  animation:breathe 1.8s ease-in-out infinite}
-.breathing.speaking {
-  width:calc(100% - 64px);
-  max-width:560px;
-  height:58px}
-.caption {
-  font-family:Newsreader,Georgia,serif;
-  font-size:18px;
-  font-style:italic;
-  color:#efb66b;
-  line-height:1.3;
-  max-height:45px;
-  overflow:auto;
-  flex:1}
-.overlay-label {
-  font-size:11px;
-  flex:1}
-.clock {
-  font-size:9px;
-  color:#9396ac}
+/* One persistent writing surface: speech and silence never change its size. */
+.writing-surface { position:relative; }
+.status-label { display:flex; align-items:center; gap:8px; min-height:16px; }
+.status-dot { width:6px; height:6px; border-radius:50%; background:var(--held); }
+.is-active .status-dot { background:var(--live); }
+.clock { font-size:10px; font-variant-numeric:tabular-nums; min-width:28px; color:var(--muted); }
+.session-note { padding:10px 28px; min-height:48px; font-size:11px; line-height:1.6; color:var(--muted); }
+.follow-latest { position:absolute; bottom:14px; right:28px; border:1px solid var(--line); border-radius:6px; background:var(--panel); color:var(--ink); padding:9px 12px; font-size:11px; box-shadow:0 2px 8px #0000000a; }
 .controls {
   display:flex;
   justify-content:space-between;
@@ -279,10 +233,6 @@ footer p {
   border-left:2px solid var(--live);
   padding-left:12px;
   margin-top:25px}
-@keyframes breathe {
-  50% {
-  opacity:.5}
-}
 @media(max-width:700px) {
   main {
   padding:22px}
@@ -300,8 +250,6 @@ textarea {
 footer {
   flex-wrap:wrap;
   gap:0}
-.breathing.speaking {
-  width:calc(100% - 32px)}
 }
 @media(prefers-reduced-motion:reduce) {
   *,*::before,*::after {
