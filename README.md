@@ -2,7 +2,7 @@
 
 Local voice dictation for the desktop, with live captions and careful delivery to the intended text field.
 
-**Personal preview:** a macOS app now records English speech, shows real live captions, and lets you edit and copy the final text. Recognition runs locally in an owned worker process. Windows and Linux desktop support remains planned and unvalidated.
+**Personal preview:** a macOS app now records English speech, shows real live captions, and sends the final text to a verified original field, with editable Copy fallback. Recognition runs locally in an owned worker process. Windows and Linux desktop support remains planned and unvalidated.
 
 ## Run the app
 
@@ -18,7 +18,7 @@ Download the English model in the app once (199 MB), then choose **Start recordi
 
 Once ready, **Command–Shift–Space** starts dictation in a floating window while you work in another app. Press it again while listening to stop. **Float window** and **Expand window** switch views without replacing the paragraph. The floating window stays above ordinary windows and stays open after Stop; drag, resize, or minimize it using its native title bar. A shortcut conflict shows a retry control; the normal recording buttons remain usable. The preview uses a fixed toggle shortcut; customization and hold-to-talk are later work.
 
-Logia runs as a menu-bar utility on macOS. After model setup, launch prepares recognition in the background; use the shortcut to dictate or the menu-bar icon → **Open Logia** for setup and text recovery. Closing an idle window hides it and retains its in-memory text. Finish or cancel an active session before dismissing it. **Quit Logia** exits and stops its worker. Automatic delivery into the original field is still pending; this increment keeps explicit Copy as delivery.
+Logia runs as a menu-bar utility on macOS. After model setup, launch prepares recognition in the background; use the shortcut to dictate or the menu-bar icon → **Open Logia** for setup and text recovery. Closing an idle window hides it and retains its in-memory text. Finish or cancel an active session before dismissing it. **Quit Logia** exits and stops its worker. To enable automatic delivery, open Logia and choose **Enable typing in other apps**, then allow Logia in macOS Accessibility settings. Start from the desired text field with the global shortcut and use the shortcut again to stop. Recording from Logia’s own button stays copy-only.
 
 On launch, the app prepares native recognition using generated silence before enabling Record. This preparation never opens a microphone. You can cancel it; the next recording can still initialize the recognizer normally. Device audio is collected into bounded chunks and, after conversion, fed to recognition in consistent 64 ms blocks regardless of microphone sample rate. Stop flushes the remaining audio rather than losing the last short callback.
 
@@ -26,9 +26,9 @@ Build a standalone local app with `pnpm tauri build --debug --bundles app`. It a
 
 The preview supports passages up to 60 seconds, keeps no transcript history, and saves no recordings. Captions can revise until finalization; recognition errors can still occur. The model download uses a pinned revision and verified SHA-256. After download, recognition requires no network connection.
 
-Both window sizes use the same persistent paragraph while recording, through pauses, and after Stop. Received words appear progressively within 140 ms; corrections update in place, and final text appears immediately. Reduced-motion preferences disable that pacing. Long passages follow the latest words until you scroll back; choose **Follow latest words** to resume following. Verified insertion into other applications, vocabulary support, history, and other language models are later work.
+Both window sizes use the same persistent paragraph while recording, through pauses, and after Stop. Received words appear progressively within 140 ms; corrections update in place, and final text appears immediately. Reduced-motion preferences disable that pacing. Long passages follow the latest words until you scroll back; choose **Follow latest words** to resume following. Vocabulary support, opt-in history, configurable shortcuts, and other language models remain planned.
 
-Mac native checks cover shortcut registration, revealing the background/minimized window without changing the foreground app, and restoring editor size. Spaces/fullscreen and multiple displays still need desktop acceptance; a detected failure to appear on the active Space refuses shortcut capture. No Accessibility permission or automatic insertion is added by the shortcut.
+Mac native checks cover shortcut registration, revealing the background/minimized window without changing the foreground app, and restoring editor size. Spaces/fullscreen and multiple displays still need desktop acceptance; a detected failure to appear on the active Space refuses shortcut capture. The shortcut captures the original target before showing Logia. Delivery requires Accessibility access, matching application/window/field identity, unchanged selection, and a selected-text write capability. Unknown or changed targets stay copy-only. Chrome/Electron/terminal compatibility remains conditional and needs application-specific validation.
 
 ```mermaid
 flowchart LR
@@ -41,10 +41,13 @@ flowchart LR
     Resample --> Model[Local Moonshine streaming model]
     Model -->|partial / final events| Parent
     Parent --> Caption[Live captions and editable text]
+    Parent -->|one final + clean worker exit| Check[Recheck original field and selection]
+    Check -->|match: one selected-text write| Field[Original text field]
+    Check -->|unknown or changed| Caption
     Caption -->|user chooses Copy| Clipboard[Clipboard]
 ```
 
-Stop cuts off capture independently of inference and drains queued audio. Cancel invalidates the session before killing and reaping its worker. A replacement cannot start until the previous worker exits. The model loads per recording in this preview.
+Stop cuts off capture independently of inference and drains queued audio. Cancel invalidates the session before killing and reaping its worker. A replacement cannot start until the previous worker exits and delivery finishes. Once delivery begins, it cannot be retracted; a Cancel racing that boundary retains and reports the final outcome. “Text sent” means the target accepted one Accessibility write, without reading back field contents. An uncertain write is never retried: check the field before copying. No automatic paste or Enter is sent. AX cannot atomically compare and write; focus is rechecked immediately before the single write. The model loads per recording in this preview.
 
 Checks, from the repository root:
 
@@ -60,7 +63,10 @@ For the Mac window integration check, build the synthetic fixture and run the se
 ```sh
 swift build --package-path spikes/target-identity
 cargo run --manifest-path apps/desktop/src-tauri/Cargo.toml --locked --example window_smoke -- spikes/target-identity/.build/debug/target-fixture
+cargo run --manifest-path apps/desktop/src-tauri/Cargo.toml --locked --example delivery_smoke -- spikes/target-identity/.build/debug/target-fixture
 ```
+
+The delivery example requires Accessibility access and writes only to its owned fixture. It verifies exact Unicode selection replacement and refuses changed selections/fields, stale references, secure/read-only fields, canceled/duplicate attempts, and invalid text. It never requests permission or activates the microphone automatically. The Swift target core is linked into Logia itself so production delivery uses Logia’s permission identity.
 
 ## Target-identity probe
 
@@ -110,7 +116,7 @@ cargo clippy --manifest-path spikes/recognition/Cargo.toml --locked --all-target
 ## Direction
 
 1. Try the Mac recording/captions/copy loop and improve actual microphone behavior.
-2. Validate Chromium/Electron field identity, then add verified delivery with Copy fallback and explicit vocabulary support.
+2. Validate real application delivery, expand Chromium/Electron coverage, and add explicit vocabulary support.
 3. Add configurable controls, opt-in local history and beta features, then validate Windows and Linux integrations.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development and data-handling rules.

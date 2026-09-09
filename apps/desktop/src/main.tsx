@@ -4,6 +4,7 @@ import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { TranscriptEditor } from './transcript-editor';
 import { useDictationWindow } from './use-dictation-window';
+import { useDelivery, deliveryNote, type CapturedTarget } from './use-delivery';
 import '@fontsource/archivo/400.css';
 import '@fontsource/archivo/500.css';
 import '@fontsource/newsreader/400.css';
@@ -25,10 +26,13 @@ function App() {
   const [dark, setDark] = useState(false);
   const generation = useRef(0);
   const controlIntent = useRef(0);
+  const recordingIntent = useRef(0);
+  const shortcutStarting = useRef(false);
   const dismissing = useRef(false);
   const [isDismissing, setDismissing] = useState(false);
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
+  const delivery = useDelivery(native, generation, phaseRef);
   const windowView = useDictationWindow(native, () => void toggleFromShortcut(), () => void dismissWindow());
   function transition(next: Phase) { phaseRef.current = next; setPhase(next); }
   const active = ['loading','recording','finishing','canceling'].includes(phase);
@@ -87,10 +91,21 @@ function App() {
   async function toggleFromShortcut() {
     if (dismissing.current) return;
     if (phaseRef.current === 'recording') { await stop(); return; }
-    if (phaseRef.current !== 'ready') return;
+    if (phaseRef.current !== 'ready' || shortcutStarting.current) return;
+    shortcutStarting.current = true;
     const intent = controlIntent.current;
-    try { if (await windowView.change(true, true) && controlIntent.current === intent) await start(); }
+    let target: CapturedTarget | undefined;
+    let started = false;
+    try {
+      target = await delivery.capture();
+      if (controlIntent.current !== intent) return;
+      if (await windowView.change(true, true) && controlIntent.current === intent) started = await start(target);
+    }
     catch (e) { setError(String(e)); }
+    finally {
+      if (target && !started) await delivery.discard(target.token).catch(() => {});
+      shortcutStarting.current = false;
+    }
   }
   async function changeWindow() {
     controlIntent.current++;
@@ -109,12 +124,14 @@ function App() {
     finally { dismissing.current = false; setDismissing(false); }
   }
 
-  async function start() {
-    if (!native || phaseRef.current !== 'ready' || dismissing.current) return;
+  async function start(target?: CapturedTarget): Promise<boolean> {
+    if (!native || phaseRef.current !== 'ready' || dismissing.current) return false;
     controlIntent.current++;
+    recordingIntent.current++;
     setError(''); setText(''); setComplete(false); setCopied(false); transition('loading');
-    try { generation.current = Math.max(generation.current, await invoke<number>('start_recording')); }
-    catch (e) { setError(String(e)); transition('ready'); }
+    delivery.setStatus(target?.status ?? 'copy');
+    try { generation.current = Math.max(generation.current, await invoke<number>('start_recording', { target: target?.token ?? null })); return true; }
+    catch (e) { setError(String(e)); delivery.setStatus('copy'); transition('ready'); return false; }
   }
   async function stop() {
     if (phaseRef.current !== 'recording') return;
@@ -125,11 +142,19 @@ function App() {
   }
   async function cancel() {
     controlIntent.current++;
+    const intent = recordingIntent.current;
     const preparing = phaseRef.current === 'warming';
     phaseRef.current = 'canceling';
     transition('canceling');
-    if (!preparing) { setText(''); setComplete(false); }
-    try { await invoke('cancel_recording'); }
+    try {
+      const outcome = await invoke<{ status: string; text?: string }>('cancel_recording');
+      if (recordingIntent.current !== intent) return;
+      setError('');
+      if (outcome?.status === 'sent' || outcome?.status === 'uncertain') {
+        delivery.setStatus(outcome.status); setText(outcome.text ?? ''); setComplete(true);
+      }
+      else { delivery.setStatus('copy'); if (!preparing) { setText(''); setComplete(false); } }
+    }
     catch (e) { setError(String(e)); }
   }
   async function download() {
@@ -147,7 +172,7 @@ function App() {
     try { await invoke('plugin:clipboard-manager|write_text', { text }); setCopied(true); }
     catch { setError('Could not copy. Select the text and use your usual copy shortcut.'); }
   }
-  const status = phase === 'recording' ? 'Listening' : phase === 'warming' ? 'Preparing voice model' : phase === 'loading' ? 'Preparing' : phase === 'finishing' ? 'Finishing' : phase === 'canceling' ? 'Stopping' : complete && text ? 'Ready to use' : 'Ready when you are';
+  const status = phase === 'recording' ? 'Listening' : phase === 'warming' ? 'Preparing voice model' : phase === 'loading' ? 'Preparing' : phase === 'finishing' ? 'Finishing' : phase === 'canceling' ? 'Stopping' : complete && text ? (delivery.status === 'sent' ? 'Text sent' : 'Ready to use') : 'Ready when you are';
   const setup = ['setup','downloading','checking'].includes(phase);
 
   return <main data-view={windowView.floating ? 'floating' : 'full'}>
@@ -160,16 +185,16 @@ function App() {
       <small>{phase === 'downloading' ? 'You can leave this window open while it downloads.' : '199 MB · no account needed'}</small></div>
     </section> : <section className="workspace" aria-label="Dictation">
       <div className="workspace-heading"><span>Your words</span><span className={`status-label ${active ? 'is-active' : ''}`} role="status"><span className="status-dot"/>{status}<span className="clock">{active ? `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2,'0')}` : ''}</span></span></div>
-      <TranscriptEditor text={text} active={active} streaming={(phase === 'recording' || phase === 'finishing') && !complete} onChange={value => { setText(value); setCopied(false); }} />
-      <div className="session-note">{phase === 'warming' ? 'Preparing local recognition. Your microphone is off.' : phase === 'recording' ? 'Pauses are welcome. Recording continues until you choose Stop or reach 60 seconds.' : phase === 'finishing' ? 'Finishing the last words. Your paragraph stays here.' : complete && text ? 'Ready to edit and copy. Your paragraph stays until you clear it or start again.' : 'Your whole paragraph appears here, with room to pause and think.'}</div>
-      <div className="controls"><div><button className="quiet" disabled={!text || active} onClick={() => { setText(''); setComplete(false); }}>Clear</button><button className="copy" disabled={!text || active} onClick={() => void copy()}>{copied ? 'Copied' : complete ? 'Copy text' : 'Copy partial'}</button></div>
-      <div className="record-actions">{(active || phase === 'warming') && <button className="quiet" onClick={() => void cancel()} disabled={phase === 'canceling'}>Cancel</button>}
+      <TranscriptEditor text={text} active={active} streaming={(phase === 'recording' || phase === 'finishing') && !complete} onChange={value => { setText(value); setCopied(false); delivery.setStatus('copy'); }} />
+      <div className="session-note">{phase === 'warming' ? 'Preparing local recognition. Your microphone is off.' : phase === 'recording' ? 'Pauses are welcome. Recording continues until you choose Stop or reach 60 seconds.' : phase === 'finishing' ? 'Finishing the last words. Your paragraph stays here.' : deliveryNote(delivery.status, complete)}</div>
+      <div className="controls"><div><button className="quiet" disabled={!text || active} onClick={() => { setText(''); setComplete(false); delivery.setStatus('copy'); }}>Clear</button><button className="copy" disabled={!text || active} onClick={() => void copy()}>{copied ? 'Copied' : complete ? 'Copy text' : 'Copy partial'}</button></div>
+      <div className="record-actions">{(active || phase === 'warming') && <button className="quiet" onClick={() => void cancel()} disabled={phase === 'canceling' || delivery.status === 'sending'}>Cancel</button>}
       <button className={`primary ${phase === 'recording' ? 'recording' : ''}`} disabled={isDismissing || !['ready','recording'].includes(phase)} onClick={() => void (phase === 'recording' ? stop() : start())}><span className="record-icon"/>{phase === 'recording' ? 'Stop recording' : active || phase === 'warming' ? `${status}…` : 'Start recording'}</button></div></div>
     </section>}
     {error && <div className="error" role="alert">{error}</div>}
     <footer><p><span className="privacy-dot"/>On-device. No transcript history.</p><p>English preview · up to 60 seconds</p></footer>
     {native && <div className="shortcut-note">{windowView.shortcut && <><kbd>{windowView.shortcut}</kbd><span>Record / stop from any app</span></>}{windowView.shortcutError && <><span role="alert">{windowView.shortcutError}</span>{windowView.retryable && <button className="quiet" onClick={() => void windowView.register()}>Retry shortcut</button>}</>}</div>}
-    <p className="footnote">{setup ? 'Your microphone starts only when you choose Record.' : 'Copy your words wherever you need them.'}</p>
+    <p className="footnote">{setup ? 'Your microphone starts only when you choose Record.' : native && !windowView.floating ? <button className="quiet" onClick={() => void delivery.permission().catch(e => setError(String(e)))}>Enable typing in other apps</button> : delivery.status === 'armed' ? 'Stop with the shortcut to send your words.' : 'Your words stay available to copy.'}</p>
   </main>;
 }
 createRoot(document.getElementById('root')!).render(<App/>);

@@ -28,8 +28,21 @@ import AppKit
 
     func handle(_ command: String) {
         if command == "quit" { NSApp.terminate(nil); return }
+        if command.hasPrefix("assert-") {
+            let expected = command == "assert-sent" ? "Before Hello, café.\nAnother thought. after" :
+                command == "assert-recreated" ? "First synthetic text area" : "Before OLD after"
+            FileHandle.standardOutput.write(Data((first.string == expected ? "pass\n" : "fail\n").utf8))
+            return
+        }
         first.isEditable = true
         switch command {
+        case "delivery-select":
+            first.string = "Before OLD after"
+            window.makeFirstResponder(first)
+            first.setSelectedRange(NSRange(location: 7, length: 3))
+        case "delivery-move":
+            window.makeFirstResponder(first)
+            first.setSelectedRange(NSRange(location: 0, length: 0))
         case "first": window.makeFirstResponder(first)
         case "second": window.makeFirstResponder(second)
         case "secure": window.makeFirstResponder(secure)

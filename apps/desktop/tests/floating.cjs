@@ -12,7 +12,7 @@ const assert = require('node:assert/strict');
       let id = 0, generation = 0;
       const callbacks = new Map(), events = new Map();
       window.isTauri = true;
-      window.starts = 0; window.stops = 0; window.conflict = true;
+      window.starts = 0; window.stops = 0; window.conflict = true; window.captures = 0; window.discarded = [];
       window.emitTest = (name, payload) => callbacks.get(events.get(name))?.({ payload });
       window.recognition = event => window.emitTest('recognition', { generation, event });
       window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
@@ -31,15 +31,22 @@ const assert = require('node:assert/strict');
             if (window.delayHide) await new Promise(resolve => { window.finishHide = resolve; });
             window.hidden = true; return;
           }
+          if (command === 'capture_target') return { token: String(++window.captures), status: 'armed' };
+          if (command === 'discard_target') { window.discarded.push(args.token); return; }
+          if (command === 'accessibility_permission') return true;
           if (command === 'warmup_recognizer') return generation;
           if (command === 'set_floating') {
+            window.capturesBeforeReveal = window.captures;
             if (window.failWindow) throw 'Could not position the dictation window.';
             if (window.delayWindow) await new Promise(resolve => { window.finishWindow = resolve; });
             window.floating = args.floating; return;
           }
-          if (command === 'start_recording') { window.starts++; generation++; setTimeout(() => window.recognition({ type: 'listening' }), 30); return generation; }
-          if (command === 'stop_recording') { window.stops++; window.recognition({ type: 'final', text: 'A whole thought, with room to breathe.' }); window.recognition({ type: 'stopped' }); return; }
-          if (command === 'cancel_recording') { generation++; window.recognition({ type: 'stopped' }); return; }
+          if (command === 'start_recording') { window.lastTarget = args.target; window.starts++; generation++; setTimeout(() => window.recognition({ type: 'listening' }), 30); return generation; }
+          if (command === 'stop_recording') { window.stops++; window.recognition({ type: 'final', text: 'A whole thought, with room to breathe.' }); window.emitTest('delivery', { generation, status: 'sent' }); window.recognition({ type: 'stopped' }); return; }
+          if (command === 'cancel_recording') {
+            if (window.delayCancel) return new Promise(resolve => { window.finishCancel = () => { window.emitTest('delivery', { generation, status: 'sent' }); window.recognition({ type: 'stopped' }); resolve({ status: 'sent', text: 'The authoritative delivered paragraph.' }); }; });
+            generation++; window.recognition({ type: 'stopped' }); return { status: 'canceled' };
+          }
           if (command === 'plugin:clipboard-manager|write_text') { window.copied = args.text; return; }
           throw new Error(`Unexpected command: ${command}`);
         }
@@ -57,6 +64,7 @@ const assert = require('node:assert/strict');
     await page.evaluate(() => { window.failWindow = true; window.emitTest('dictation-shortcut', null); });
     await page.getByText('Could not position the dictation window.').waitFor();
     assert.equal(await page.evaluate(() => window.starts), 0);
+    assert.deepEqual(await page.evaluate(() => window.discarded), ['1'], 'failed reveal must discard the captured target');
     assert.equal(await page.locator('textarea').inputValue(), 'Keep this until a recording actually starts.');
     await page.evaluate(() => {
       window.failWindow = false; window.delayWindow = true;
@@ -68,6 +76,8 @@ const assert = require('node:assert/strict');
     await page.evaluate(() => { window.delayWindow = false; window.finishWindow(); });
     await page.getByRole('button', { name: 'Stop recording', exact: true }).waitFor();
     assert.equal(await page.evaluate(() => window.starts), 1, 'rapid triggers must not start duplicate workers');
+    assert.equal(await page.evaluate(() => window.lastTarget), '2', 'recording binds the captured target');
+    assert.equal(await page.evaluate(() => window.capturesBeforeReveal), 2, 'capture precedes revealing the window');
     assert.equal(await page.locator('main').getAttribute('data-view'), 'floating');
     assert.equal(await page.evaluate(() => window.scrollY), 0, 'floating mode must not inherit outer page scroll');
     await page.evaluate(() => window.recognition({ type: 'partial', text: 'A whole thought, with room to breathe.' }));
@@ -78,6 +88,7 @@ const assert = require('node:assert/strict');
     const box = await page.locator('textarea').boundingBox();
     await page.screenshot({ path: '/tmp/logia-floating-speaking.png', animations: 'disabled' });
     await page.evaluate(() => window.emitTest('dictation-shortcut', null));
+    await page.getByText('Text sent', { exact: true }).waitFor();
     await page.getByRole('button', { name: 'Copy text' }).click();
     assert.equal(await page.evaluate(() => window.copied), 'A whole thought, with room to breathe.');
     assert.deepEqual(await page.locator('textarea').boundingBox(), box, 'Stop must not collapse floating paragraph');
@@ -93,6 +104,7 @@ const assert = require('node:assert/strict');
     await page.waitForFunction(() => Boolean(window.finishWindow));
     await page.getByRole('button', { name: 'Start recording', exact: true }).click();
     await page.getByRole('button', { name: 'Stop recording', exact: true }).waitFor();
+    assert.equal(await page.evaluate(() => window.lastTarget), null, 'starting in Logia is copy-only');
     await page.getByRole('button', { name: 'Cancel', exact: true }).click();
     await page.getByRole('button', { name: 'Start recording', exact: true }).waitFor();
     await page.evaluate(() => { window.delayWindow = false; window.finishWindow(); });
@@ -105,6 +117,18 @@ const assert = require('node:assert/strict');
     assert.equal(await page.evaluate(() => window.starts), 2, 'dismissing cannot race with a new microphone start');
     await page.evaluate(() => { window.delayHide = false; window.finishHide(); });
     await page.getByRole('button', { name: 'Start recording', exact: true }).waitFor();
+    // Cancel arriving after native delivery committed must retain/report its result.
+    await page.getByRole('button', { name: 'Start recording', exact: true }).click();
+    await page.getByRole('button', { name: 'Stop recording', exact: true }).waitFor();
+    await page.evaluate(() => { window.delayCancel = true; window.recognition({ type: 'partial', text: 'A partial thought' }); });
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await page.waitForFunction(() => Boolean(window.finishCancel));
+    await page.getByRole('button', { name: 'Expand window', exact: true }).click();
+    await page.evaluate(() => window.emitTest('dictation-dismiss', null));
+    await page.evaluate(() => { window.recognition({ type: 'final', text: 'The authoritative delivered paragraph.' }); window.finishCancel(); window.delayCancel = false; });
+    await page.getByText('Text sent', { exact: true }).waitFor();
+    assert.equal(await page.locator('textarea').inputValue(), 'The authoritative delivered paragraph.', 'late Cancel retains the authoritative sent text');
+    await page.getByRole('button', { name: 'Float window', exact: true }).click();
     await page.setViewportSize({ width: 480, height: 460 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     assert((await page.getByRole('button', { name: 'Start recording', exact: true }).boundingBox()).y < 420, 'primary action remains visible at minimum floating size');

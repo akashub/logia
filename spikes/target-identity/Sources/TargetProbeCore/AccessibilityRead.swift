@@ -11,7 +11,12 @@ public struct CaptureFailure: Error, CustomStringConvertible {
 }
 
 enum AccessibilityRead {
+    static func bound(_ element: AXUIElement) throws {
+        let code = AXUIElementSetMessagingTimeout(element, 0.25)
+        guard code == .success else { throw CaptureFailure("messaging-timeout", code: code) }
+    }
     static func value(_ element: AXUIElement, _ attribute: String) throws -> CFTypeRef {
+        try bound(element)
         var result: CFTypeRef?
         let code = AXUIElementCopyAttributeValue(element, attribute as CFString, &result)
         guard code == .success else { throw CaptureFailure(attribute, code: code) }

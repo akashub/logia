@@ -10,6 +10,47 @@ public struct FocusSnapshot {
     private let field: AXUIElement
 
     public static var hasPermission: Bool { AXIsProcessTrusted() }
+    public var belongsToCurrentProcess: Bool { pid == ProcessInfo.processInfo.processIdentifier }
+
+    // Selection metadata only. Reading the text itself is unnecessary.
+    public func selection() throws -> CFRange {
+        try AccessibilityRead.requireEditable(field)
+        var settable: DarwinBoolean = false
+        guard AXUIElementIsAttributeSettable(field, kAXSelectedTextAttribute as CFString, &settable) == .success,
+              settable.boolValue else { throw CaptureFailure("selected-text-not-settable") }
+        let value = try AccessibilityRead.value(field, kAXSelectedTextRangeAttribute)
+        guard CFGetTypeID(value) == AXValueGetTypeID() else { throw CaptureFailure("selection-type") }
+        let ax = unsafeDowncast(value, to: AXValue.self)
+        var range = CFRange()
+        guard AXValueGetType(ax) == .cfRange, AXValueGetValue(ax, .cfRange, &range),
+              range.location >= 0, range.length >= 0 else { throw CaptureFailure("selection-unavailable") }
+        return range
+    }
+
+    public func send(_ text: String, selection expected: CFRange) -> DeliveryResult {
+        var attempt = DeliveryAttempt()
+        return attempt.send(text: text, verify: {
+            guard let fresh = try? Self.capture(), verdict(comparedTo: fresh) == .same,
+                  let range = try? fresh.selection(), range.location == expected.location,
+                  range.length == expected.length, stillFocused() else { return .unknown }
+            return .same
+        }, write: {
+            // Exact retained field, one selected-text write. Never AXValue or Enter.
+            guard (try? AccessibilityRead.bound(field)) != nil else { return false }
+            return AXUIElementSetAttributeValue(field, kAXSelectedTextAttribute as CFString, $0 as CFString) == .success
+        })
+    }
+
+    private func stillFocused() -> Bool {
+        guard let focusedWindow = try? AccessibilityRead.element(application, kAXFocusedWindowAttribute),
+              CFEqual(window, focusedWindow),
+              let focusedField = try? AccessibilityRead.element(application, kAXFocusedUIElementAttribute),
+              CFEqual(field, focusedField),
+              let front = NSWorkspace.shared.frontmostApplication,
+              front.isActive, !front.isTerminated, front.processIdentifier == pid,
+              ProcessIdentity.read(pid) == processIdentity else { return false }
+        return true
+    }
 
     public static func capture() throws -> FocusSnapshot {
         guard hasPermission else { throw CaptureFailure("accessibility-permission-missing") }

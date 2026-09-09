@@ -4,12 +4,16 @@ mod background;
 mod capture;
 mod capture_audio;
 mod desktop_window;
+mod final_delivery;
 mod inference_audio;
 mod messages;
 mod model_file;
 mod session;
+mod session_control;
+mod session_output;
 mod shortcut;
 mod shortcut_edge;
+mod target;
 mod warmup;
 mod worker;
 
@@ -52,11 +56,14 @@ fn main() {
             session::start_recording,
             session::warmup_recognizer,
             session::stop_recording,
-            session::cancel_recording,
+            session_control::cancel_recording,
             desktop_window::set_floating,
             shortcut::register_shortcut,
             background::show_main_window,
-            background::hide_main_window
+            background::hide_main_window,
+            target::capture_target,
+            target::discard_target,
+            target::accessibility_permission
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
