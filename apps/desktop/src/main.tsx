@@ -9,7 +9,7 @@ import '@fontsource/newsreader/400.css';
 import '@fontsource/newsreader/400-italic.css';
 import './style.css';
 
-type Phase = 'checking' | 'setup' | 'downloading' | 'ready' | 'loading' | 'recording' | 'finishing' | 'canceling';
+type Phase = 'checking' | 'setup' | 'downloading' | 'warming' | 'ready' | 'loading' | 'recording' | 'finishing' | 'canceling';
 type Update = { generation: number; event: { type: string; text?: string; message?: string } };
 function App() {
   const native = isTauri();
@@ -36,7 +36,7 @@ function App() {
         generation.current = payload.generation;
         const event = payload.event;
         if (phaseRef.current === 'canceling' && event.type !== 'stopped') return;
-        if (event.type === 'loading') setPhase('loading');
+        if (event.type === 'loading' && phaseRef.current !== 'warming') setPhase('loading');
         if (event.type === 'listening') { setPhase('recording'); setSeconds(0); }
         // Empty interim snapshots do not retract the visible paragraph.
         // An authoritative final (including an empty final) still replaces it.
@@ -48,7 +48,7 @@ function App() {
       const download = await listen<number>('model-progress', ({ payload }) => setProgress(payload));
       if (disposed) { updates(); download(); return; }
       unsubscribers.push(updates, download);
-      try { setPhase(await invoke<boolean>('model_ready') ? 'ready' : 'setup'); }
+      try { if (await invoke<boolean>('model_ready')) await prepare(); else setPhase('setup'); }
       catch (e) { setError(String(e)); setPhase('setup'); }
     };
     void register().catch(() => { if (!disposed) { setError('Could not connect to recognition. Close and reopen Logia.'); setPhase('setup'); } });
@@ -86,21 +86,29 @@ function App() {
     catch (e) { setError(String(e)); }
   }
   async function cancel() {
+    const preparing = phaseRef.current === 'warming';
     phaseRef.current = 'canceling';
-    setPhase('canceling'); setText(''); setComplete(false);
+    setPhase('canceling');
+    if (!preparing) { setText(''); setComplete(false); }
     try { await invoke('cancel_recording'); }
     catch (e) { setError(String(e)); }
   }
   async function download() {
     setPhase('downloading'); setError(''); setProgress(0);
-    try { await invoke('download_model'); setPhase('ready'); }
+    try { await invoke('download_model'); await prepare(); }
     catch (e) { setError(String(e)); setPhase('setup'); }
+  }
+  async function prepare() {
+    phaseRef.current = 'warming';
+    setPhase('warming');
+    try { generation.current = Math.max(generation.current, await invoke<number>('warmup_recognizer')); }
+    catch (e) { setError(String(e)); setPhase('ready'); }
   }
   async function copy() {
     try { await invoke('plugin:clipboard-manager|write_text', { text }); setCopied(true); }
     catch { setError('Could not copy. Select the text and use your usual copy shortcut.'); }
   }
-  const status = phase === 'recording' ? 'Listening' : phase === 'loading' ? 'Preparing' : phase === 'finishing' ? 'Finishing' : phase === 'canceling' ? 'Stopping' : complete && text ? 'Ready to use' : 'Ready when you are';
+  const status = phase === 'recording' ? 'Listening' : phase === 'warming' ? 'Preparing voice model' : phase === 'loading' ? 'Preparing' : phase === 'finishing' ? 'Finishing' : phase === 'canceling' ? 'Stopping' : complete && text ? 'Ready to use' : 'Ready when you are';
   const setup = ['setup','downloading','checking'].includes(phase);
 
   return <main>
@@ -114,10 +122,10 @@ function App() {
     </section> : <section className="workspace" aria-label="Dictation">
       <div className="workspace-heading"><span>Your words</span><span className={`status-label ${active ? 'is-active' : ''}`} role="status"><span className="status-dot"/>{status}<span className="clock">{active ? `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2,'0')}` : ''}</span></span></div>
       <TranscriptEditor text={text} active={active} streaming={(phase === 'recording' || phase === 'finishing') && !complete} onChange={value => { setText(value); setCopied(false); }} />
-      <div className="session-note">{phase === 'recording' ? 'Pauses are welcome. Recording continues until you choose Stop or reach 60 seconds.' : phase === 'finishing' ? 'Finishing the last words. Your paragraph stays here.' : complete && text ? 'Ready to edit and copy. Your paragraph stays until you clear it or start again.' : 'Your whole paragraph appears here, with room to pause and think.'}</div>
+      <div className="session-note">{phase === 'warming' ? 'Preparing local recognition. Your microphone is off.' : phase === 'recording' ? 'Pauses are welcome. Recording continues until you choose Stop or reach 60 seconds.' : phase === 'finishing' ? 'Finishing the last words. Your paragraph stays here.' : complete && text ? 'Ready to edit and copy. Your paragraph stays until you clear it or start again.' : 'Your whole paragraph appears here, with room to pause and think.'}</div>
       <div className="controls"><div><button className="quiet" disabled={!text || active} onClick={() => { setText(''); setComplete(false); }}>Clear</button><button className="copy" disabled={!text || active} onClick={() => void copy()}>{copied ? 'Copied' : complete ? 'Copy text' : 'Copy partial'}</button></div>
-      <div className="record-actions">{active && <button className="quiet" onClick={() => void cancel()} disabled={phase === 'canceling'}>Cancel</button>}
-      <button className={`primary ${phase === 'recording' ? 'recording' : ''}`} disabled={!['ready','recording'].includes(phase)} onClick={() => void (phase === 'recording' ? stop() : start())}><span className="record-icon"/>{phase === 'recording' ? 'Stop recording' : active ? `${status}…` : 'Start recording'}</button></div></div>
+      <div className="record-actions">{(active || phase === 'warming') && <button className="quiet" onClick={() => void cancel()} disabled={phase === 'canceling'}>Cancel</button>}
+      <button className={`primary ${phase === 'recording' ? 'recording' : ''}`} disabled={!['ready','recording'].includes(phase)} onClick={() => void (phase === 'recording' ? stop() : start())}><span className="record-icon"/>{phase === 'recording' ? 'Stop recording' : active || phase === 'warming' ? `${status}…` : 'Start recording'}</button></div></div>
     </section>}
     {error && <div className="error" role="alert">{error}</div>}
     <footer><p><span className="privacy-dot"/>On-device. No transcript history.</p><p>English preview · up to 60 seconds</p></footer>

@@ -109,74 +109,15 @@ where
 {
     let channels = config.channels as usize;
     let errors = failed.clone();
+    let mut audio = crate::capture_audio::CaptureAudio::new(sender, failed);
     device.build_input_stream(
         config,
         move |input: &[T], _| {
-            enqueue(input, channels, &sender, &failed, &stop);
+            audio.push(input, channels, &stop);
         },
         move |_| {
             errors.store(true, Ordering::Release);
         },
         None,
     )
-}
-
-fn enqueue<T: Sample>(
-    input: &[T],
-    channels: usize,
-    sender: &SyncSender<Vec<f32>>,
-    failed: &AtomicBool,
-    stop: &AtomicBool,
-) where
-    f32: FromSample<T>,
-{
-    if failed.load(Ordering::Relaxed) {
-        return;
-    }
-    for input_chunk in input.chunks(CHUNK * channels) {
-        if stop.load(Ordering::Acquire) {
-            return;
-        }
-        let ready: Vec<f32> = input_chunk
-            .chunks_exact(channels)
-            .map(|frame| {
-                frame
-                    .iter()
-                    .map(|sample| sample.to_sample::<f32>())
-                    .sum::<f32>()
-                    / channels as f32
-            })
-            .collect();
-        if ready.iter().any(|sample| !sample.is_finite()) || sender.try_send(ready).is_err() {
-            failed.store(true, Ordering::Release);
-            return;
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn stop_cuts_off_audio_even_when_inference_is_not_draining() {
-        let (sender, receiver) = sync_channel(2);
-        let failed = AtomicBool::new(false);
-        let stop = AtomicBool::new(false);
-        enqueue(&[0.25f32; CHUNK], 1, &sender, &failed, &stop);
-        stop.store(true, Ordering::Release);
-        enqueue(&[0.75f32; CHUNK], 1, &sender, &failed, &stop);
-        assert_eq!(receiver.try_recv().unwrap(), vec![0.25; CHUNK]);
-        assert!(receiver.try_recv().is_err());
-        assert!(!failed.load(Ordering::Acquire));
-    }
-    #[test]
-    fn callback_overflow_fails_without_blocking_or_growing_queue() {
-        let (sender, receiver) = sync_channel(1);
-        let failed = AtomicBool::new(false);
-        let stop = AtomicBool::new(false);
-        enqueue(&[0.1f32; CHUNK * 3], 1, &sender, &failed, &stop);
-        assert!(failed.load(Ordering::Acquire));
-        assert_eq!(receiver.try_recv().unwrap().len(), CHUNK);
-        assert!(receiver.try_recv().is_err());
-    }
 }

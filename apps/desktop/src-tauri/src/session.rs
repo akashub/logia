@@ -30,6 +30,22 @@ pub fn start_recording(
     app: tauri::AppHandle,
     sessions: tauri::State<'_, Sessions>,
 ) -> Result<u64, String> {
+    launch(app, sessions, "--recognizer")
+}
+
+#[tauri::command]
+pub fn warmup_recognizer(
+    app: tauri::AppHandle,
+    sessions: tauri::State<'_, Sessions>,
+) -> Result<u64, String> {
+    launch(app, sessions, "--warmup")
+}
+
+fn launch(
+    app: tauri::AppHandle,
+    sessions: tauri::State<'_, Sessions>,
+    mode: &str,
+) -> Result<u64, String> {
     let mut state = sessions.0.lock().map_err(|_| "Session state unavailable")?;
     if state.child.is_some() {
         return Err("Wait for the current recording to stop".into());
@@ -40,7 +56,7 @@ pub fn start_recording(
     }
     let executable = std::env::current_exe().map_err(|_| "Could not locate the recognizer")?;
     let mut child = Command::new(executable)
-        .arg("--recognizer")
+        .arg(mode)
         .arg(path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

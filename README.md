@@ -16,6 +16,8 @@ pnpm tauri dev
 
 Download the English model in the app once (199 MB), then choose **Start recording**. Grant Microphone permission when macOS asks. **Stop recording** finishes the text; **Cancel** discards it and terminates recognition. Edit the result and choose **Copy text**. Command–Enter starts/stops recording while this window is focused.
 
+On launch, the app prepares native recognition using generated silence before enabling Record. This preparation never opens a microphone. You can cancel it; the next recording can still initialize the recognizer normally. Device audio is collected into bounded chunks and, after conversion, fed to recognition in consistent 64 ms blocks regardless of microphone sample rate. Stop flushes the remaining audio rather than losing the last short callback.
+
 Build a standalone local app with `pnpm tauri build --debug --bundles app`. It appears at `src-tauri/target/debug/bundle/macos/Logia.app`. The native inference library remains optimized in this debug preview. A signing identity is not configured for public distribution.
 
 The preview supports passages up to 60 seconds, keeps no transcript history, and saves no recordings. Captions can revise until finalization; recognition errors can still occur. The model download uses a pinned revision and verified SHA-256. After download, recognition requires no network connection.

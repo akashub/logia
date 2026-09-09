@@ -12,6 +12,7 @@ const assert = require('node:assert/strict');
       let id = 0, generation = 0;
       const callbacks = new Map(), events = new Map();
       window.isTauri = true;
+      window.startCount = 0;
       window.testEvent = (event, gen = generation) => callbacks.get(events.get('recognition'))({ payload: { generation: gen, event } });
       window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
       window.__TAURI_INTERNALS__ = {
@@ -19,7 +20,8 @@ const assert = require('node:assert/strict');
         async invoke(command, args) {
           if (command === 'plugin:event|listen') { events.set(args.event, args.handler); return args.handler; }
           if (command === 'model_ready') return true;
-          if (command === 'start_recording') { generation++; setTimeout(() => window.testEvent({ type: 'listening' }), 20); return generation; }
+          if (command === 'warmup_recognizer') { window.completePreparation = () => window.testEvent({ type: 'stopped' }); return generation; }
+          if (command === 'start_recording') { window.startCount++; generation++; setTimeout(() => window.testEvent({ type: 'listening' }), 20); return generation; }
           if (command === 'stop_recording') {
             window.testEvent({ type: 'final', text: 'Keep the thought moving.' });
             window.testEvent({ type: 'stopped' }); return;
@@ -31,6 +33,10 @@ const assert = require('node:assert/strict');
       };
     });
     await page.goto(process.env.LOGIA_UI_URL || 'http://127.0.0.1:1420');
+    await page.getByRole('button', { name: 'Preparing voice model…', exact: true }).waitFor();
+    assert(await page.getByRole('button', { name: 'Preparing voice model…', exact: true }).isDisabled());
+    assert.equal(await page.evaluate(() => window.startCount), 0, 'preparation must never start recording');
+    await page.evaluate(() => window.completePreparation());
     await page.getByRole('button', { name: 'Start recording', exact: true }).click();
     await page.getByRole('button', { name: 'Stop recording', exact: true }).waitFor();
     const before = await page.getByRole('textbox', { name: 'Transcript' }).boundingBox();

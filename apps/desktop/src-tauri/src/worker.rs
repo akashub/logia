@@ -1,6 +1,7 @@
 use crate::{
     audio_source::AudioSource,
     capture::CHUNK,
+    inference_audio::InferenceAudio,
     messages::{emit, WorkerEvent, MAX_SECONDS},
     model_file,
 };
@@ -14,7 +15,10 @@ use std::{
     },
     time::Instant,
 };
-use transcribe_cpp::{CancelToken, CommitPolicy, Model, ModelOptions, RunOptions, StreamOptions};
+use transcribe_cpp::{
+    CancelToken, CommitPolicy, Model, ModelOptions, MoonshineStreamingOptions, RunOptions,
+    StreamExtension, StreamOptions,
+};
 
 pub fn run(model_path: &Path, audio: Option<&Path>) -> Result<(), String> {
     emit(&WorkerEvent::Loading)?;
@@ -58,6 +62,11 @@ pub fn run(model_path: &Path, audio: Option<&Path>) -> Result<(), String> {
     session.set_cancel_token(&cancel);
     let options = StreamOptions {
         commit_policy: CommitPolicy::OnFinalize,
+        family: Some(StreamExtension::MoonshineStreaming(
+            MoonshineStreamingOptions {
+                min_decode_interval_ms: Some(480),
+            },
+        )),
         ..Default::default()
     };
     let run = RunOptions {
@@ -78,6 +87,7 @@ pub fn run(model_path: &Path, audio: Option<&Path>) -> Result<(), String> {
     let started = Instant::now();
     let mut stopped = false;
     let mut pending = Vec::with_capacity(CHUNK * 2);
+    let mut inference_audio = InferenceAudio::default();
     let mut previous = String::new();
     let mut samples = 0usize;
     loop {
@@ -105,14 +115,9 @@ pub fn run(model_path: &Path, audio: Option<&Path>) -> Result<(), String> {
             let normalized = resampler
                 .process(&[input], None)
                 .map_err(|_| "Audio conversion failed")?;
-            stream
-                .feed(&normalized[0])
-                .map_err(|_| "Recognition stopped unexpectedly. Your partial text is available.")?;
-            let text = stream.text().full.trim().to_owned();
-            if text != previous {
-                emit(&WorkerEvent::Partial { text: text.clone() })?;
-                previous = text;
-            }
+            inference_audio.push(&normalized[0], |audio| {
+                feed(&mut stream, audio, &mut previous)
+            })?;
         }
     }
     source.stop();
@@ -126,16 +131,15 @@ pub fn run(model_path: &Path, audio: Option<&Path>) -> Result<(), String> {
         let normalized = resampler
             .process_partial(Some(&[pending]), None)
             .map_err(|_| "Audio flush failed")?;
-        stream
-            .feed(&normalized[0])
-            .map_err(|_| "Could not finish the last words")?;
+        inference_audio.push(&normalized[0], |audio| {
+            feed(&mut stream, audio, &mut previous)
+        })?;
     }
     let tail = resampler
         .process_partial::<Vec<f32>>(None, None)
         .map_err(|_| "Audio tail flush failed")?;
-    stream
-        .feed(&tail[0])
-        .map_err(|_| "Could not finish the audio tail")?;
+    inference_audio.push(&tail[0], |audio| feed(&mut stream, audio, &mut previous))?;
+    inference_audio.finish(|audio| feed(&mut stream, audio, &mut previous))?;
     stream
         .finalize()
         .map_err(|_| "Could not finalize speech. Your partial text is available.")?;
@@ -148,4 +152,22 @@ pub fn run(model_path: &Path, audio: Option<&Path>) -> Result<(), String> {
         return Err("This passage exceeded the recognizer's limit. Your partial text is available; try a shorter passage.".into());
     }
     emit(&WorkerEvent::Final { text })
+}
+
+fn feed(
+    stream: &mut transcribe_cpp::Stream<'_>,
+    audio: &[f32],
+    previous: &mut String,
+) -> Result<(), String> {
+    let update = stream
+        .feed(audio)
+        .map_err(|_| "Recognition stopped unexpectedly. Your partial text is available.")?;
+    if update.result_changed {
+        let text = stream.text().full.trim().to_owned();
+        if text != *previous {
+            emit(&WorkerEvent::Partial { text: text.clone() })?;
+            *previous = text;
+        }
+    }
+    Ok(())
 }

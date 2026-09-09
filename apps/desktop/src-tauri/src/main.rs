@@ -1,19 +1,30 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod audio_source;
 mod capture;
+mod capture_audio;
+mod inference_audio;
 mod messages;
 mod model_file;
 mod session;
+mod warmup;
 mod worker;
 
 fn main() {
     let arguments: Vec<String> = std::env::args().collect();
-    if arguments.get(1).is_some_and(|arg| arg == "--recognizer") {
+    if arguments
+        .get(1)
+        .is_some_and(|arg| arg == "--recognizer" || arg == "--warmup")
+    {
         let Some(model) = arguments.get(2) else {
             std::process::exit(64);
         };
         let audio = arguments.get(3).map(std::path::Path::new);
-        if let Err(message) = worker::run(std::path::Path::new(model), audio) {
+        let result = if arguments[1] == "--warmup" {
+            warmup::run(std::path::Path::new(model))
+        } else {
+            worker::run(std::path::Path::new(model), audio)
+        };
+        if let Err(message) = result {
             let _ = messages::emit(&messages::WorkerEvent::Error { message });
             std::process::exit(1);
         }
@@ -29,6 +40,7 @@ fn main() {
             model_file::model_ready,
             model_file::download_model,
             session::start_recording,
+            session::warmup_recognizer,
             session::stop_recording,
             session::cancel_recording
         ])
