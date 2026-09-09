@@ -29,7 +29,40 @@ pub async fn set_floating(app: AppHandle, floating: bool, reveal: bool) -> Resul
     .map_err(|e| e.to_string())?;
     receiver
         .await
-        .map_err(|_| "The dictation window closed.".to_string())?
+        .map_err(|_| "The dictation window closed.".to_string())??;
+    #[cfg(target_os = "macos")]
+    if reveal {
+        wait_until_visible(&app).await?;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+async fn wait_until_visible(app: &AppHandle) -> Result<(), String> {
+    // A previously hidden window joins the active Space asynchronously. Let
+    // AppKit/window-server events run; never sleep on the main thread.
+    for _ in 0..20 {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let handle = app.clone();
+        app.run_on_main_thread(move || {
+            let visible = handle
+                .get_webview_window("main")
+                .and_then(|window| {
+                    let pointer = window.ns_window().ok()?;
+                    // SAFETY: live Tauri window, on its AppKit main thread.
+                    let native = unsafe { &*pointer.cast::<objc2_app_kit::NSWindow>() };
+                    Some(native.isVisible() && native.isOnActiveSpace())
+                })
+                .unwrap_or(false);
+            let _ = tx.send(visible);
+        })
+        .map_err(|e| e.to_string())?;
+        if rx.await.unwrap_or(false) {
+            return Ok(());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    Err("Logia could not appear in this Space. Open its window before recording.".into())
 }
 
 fn geometry(window: &WebviewWindow) -> tauri::Result<Geometry> {
@@ -134,12 +167,6 @@ fn reveal_without_focus(window: &WebviewWindow) -> tauri::Result<()> {
             native.deminiaturize(None);
         }
         native.orderFrontRegardless();
-        if !native.isOnActiveSpace() {
-            return Err(std::io::Error::other(
-                "Logia could not appear in this Space. Open its window before recording.",
-            )
-            .into());
-        }
     }
     Ok(())
 }

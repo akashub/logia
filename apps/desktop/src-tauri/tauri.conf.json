@@ -13,6 +13,7 @@
     "windows": [
       {
         "title": "Logia",
+        "visible": false,
         "width": 940,
         "height": 760,
         "minWidth": 600,

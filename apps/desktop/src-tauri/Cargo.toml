@@ -8,7 +8,7 @@ publish = false
 tauri-build = { version = "=2.6.3", features = [] }
 
 [dependencies]
-tauri = { version = "=2.11.5", features = [] }
+tauri = { version = "=2.11.5", features = ["tray-icon"] }
 tauri-plugin-clipboard-manager = "=2.3.2"
 tauri-plugin-global-shortcut = "=2.3.2"
 serde = { version = "=1.0.228", features = ["derive"] }
@@ -18,7 +18,7 @@ rubato = "=0.16.2"
 hound = "=3.5.1"
 sha2 = "=0.10.9"
 reqwest = { version = "=0.12.28", default-features = false, features = ["rustls-tls", "stream"] }
-tokio = { version = "=1.49.0", features = ["fs", "io-util", "sync"] }
+tokio = { version = "=1.49.0", features = ["fs", "io-util", "sync", "time"] }
 transcribe-cpp = { version = "=0.2.3", default-features = false }
 # Upstream requires exact binding/native patch-version agreement.
 transcribe-cpp-sys = { version = "=0.2.3", default-features = false }

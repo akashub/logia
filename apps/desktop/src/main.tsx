@@ -25,9 +25,11 @@ function App() {
   const [dark, setDark] = useState(false);
   const generation = useRef(0);
   const controlIntent = useRef(0);
+  const dismissing = useRef(false);
+  const [isDismissing, setDismissing] = useState(false);
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
-  const windowView = useDictationWindow(native, () => void toggleFromShortcut());
+  const windowView = useDictationWindow(native, () => void toggleFromShortcut(), () => void dismissWindow());
   function transition(next: Phase) { phaseRef.current = next; setPhase(next); }
   const active = ['loading','recording','finishing','canceling'].includes(phase);
 
@@ -68,6 +70,9 @@ function App() {
   useEffect(() => { if (phase === 'recording' && seconds >= 60) void stop(); }, [seconds, phase]);
   useEffect(() => { document.documentElement.dataset.theme = dark ? 'dark' : 'light'; }, [dark]);
   useEffect(() => {
+    if (native && phase === 'setup') void invoke('show_main_window').catch(e => setError(String(e)));
+  }, [native, phase]);
+  useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if (!event.repeat && (event.metaKey || event.ctrlKey) && event.key === 'Enter') {
         event.preventDefault();
@@ -80,6 +85,7 @@ function App() {
   }, [phase]);
 
   async function toggleFromShortcut() {
+    if (dismissing.current) return;
     if (phaseRef.current === 'recording') { await stop(); return; }
     if (phaseRef.current !== 'ready') return;
     const intent = controlIntent.current;
@@ -91,9 +97,20 @@ function App() {
     try { await windowView.change(!windowView.floating); }
     catch (e) { setError(String(e)); }
   }
+  async function dismissWindow() {
+    if (dismissing.current) return;
+    controlIntent.current++;
+    if (['loading', 'recording', 'finishing', 'canceling'].includes(phaseRef.current)) {
+      setError('Stop or cancel recording before dismissing Logia.'); return;
+    }
+    dismissing.current = true; setDismissing(true);
+    try { await invoke('hide_main_window'); setError(''); }
+    catch (e) { setError(String(e)); }
+    finally { dismissing.current = false; setDismissing(false); }
+  }
 
   async function start() {
-    if (!native || phaseRef.current !== 'ready') return;
+    if (!native || phaseRef.current !== 'ready' || dismissing.current) return;
     controlIntent.current++;
     setError(''); setText(''); setComplete(false); setCopied(false); transition('loading');
     try { generation.current = Math.max(generation.current, await invoke<number>('start_recording')); }
@@ -147,11 +164,11 @@ function App() {
       <div className="session-note">{phase === 'warming' ? 'Preparing local recognition. Your microphone is off.' : phase === 'recording' ? 'Pauses are welcome. Recording continues until you choose Stop or reach 60 seconds.' : phase === 'finishing' ? 'Finishing the last words. Your paragraph stays here.' : complete && text ? 'Ready to edit and copy. Your paragraph stays until you clear it or start again.' : 'Your whole paragraph appears here, with room to pause and think.'}</div>
       <div className="controls"><div><button className="quiet" disabled={!text || active} onClick={() => { setText(''); setComplete(false); }}>Clear</button><button className="copy" disabled={!text || active} onClick={() => void copy()}>{copied ? 'Copied' : complete ? 'Copy text' : 'Copy partial'}</button></div>
       <div className="record-actions">{(active || phase === 'warming') && <button className="quiet" onClick={() => void cancel()} disabled={phase === 'canceling'}>Cancel</button>}
-      <button className={`primary ${phase === 'recording' ? 'recording' : ''}`} disabled={!['ready','recording'].includes(phase)} onClick={() => void (phase === 'recording' ? stop() : start())}><span className="record-icon"/>{phase === 'recording' ? 'Stop recording' : active || phase === 'warming' ? `${status}…` : 'Start recording'}</button></div></div>
+      <button className={`primary ${phase === 'recording' ? 'recording' : ''}`} disabled={isDismissing || !['ready','recording'].includes(phase)} onClick={() => void (phase === 'recording' ? stop() : start())}><span className="record-icon"/>{phase === 'recording' ? 'Stop recording' : active || phase === 'warming' ? `${status}…` : 'Start recording'}</button></div></div>
     </section>}
     {error && <div className="error" role="alert">{error}</div>}
     <footer><p><span className="privacy-dot"/>On-device. No transcript history.</p><p>English preview · up to 60 seconds</p></footer>
-    {native && <div className="shortcut-note">{windowView.shortcut && <><kbd>{windowView.shortcut}</kbd><span>Record / stop from any app</span></>}{windowView.shortcutError && <><span role="alert">{windowView.shortcutError}</span><button className="quiet" onClick={() => void windowView.register()}>Retry shortcut</button></>}</div>}
+    {native && <div className="shortcut-note">{windowView.shortcut && <><kbd>{windowView.shortcut}</kbd><span>Record / stop from any app</span></>}{windowView.shortcutError && <><span role="alert">{windowView.shortcutError}</span>{windowView.retryable && <button className="quiet" onClick={() => void windowView.register()}>Retry shortcut</button>}</>}</div>}
     <p className="footnote">{setup ? 'Your microphone starts only when you choose Record.' : 'Copy your words wherever you need them.'}</p>
   </main>;
 }

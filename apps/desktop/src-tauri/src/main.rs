@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod audio_source;
+mod background;
 mod capture;
 mod capture_audio;
 mod desktop_window;
@@ -41,6 +42,10 @@ fn main() {
             std::sync::atomic::AtomicBool::new(false),
         ))
         .manage(session::Sessions::default())
+        .setup(|app| {
+            background::setup(app)?;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             model_file::model_ready,
             model_file::download_model,
@@ -49,14 +54,27 @@ fn main() {
             session::stop_recording,
             session::cancel_recording,
             desktop_window::set_floating,
-            shortcut::register_shortcut
+            shortcut::register_shortcut,
+            background::show_main_window,
+            background::hide_main_window
         ])
         .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                use tauri::Emitter;
+                api.prevent_close();
+                let _ = window.emit("dictation-dismiss", ());
+            }
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 use tauri::Manager;
                 let _ = session::terminate(&window.state::<session::Sessions>());
             }
         })
-        .run(tauri::generate_context!())
-        .expect("Could not launch Logia");
+        .build(tauri::generate_context!())
+        .expect("Could not launch Logia")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                use tauri::Manager;
+                let _ = session::terminate(&app.state::<session::Sessions>());
+            }
+        });
 }

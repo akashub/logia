@@ -19,6 +19,17 @@ struct Inner {
 }
 #[derive(Clone, Default)]
 pub struct Sessions(Arc<Mutex<Inner>>);
+impl Sessions {
+    pub fn when_idle<T>(&self, action: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+        let state = self.0.lock().map_err(|_| "Session state unavailable")?;
+        if state.child.is_some() {
+            return Err(
+                "Wait for recognition to stop, or choose Cancel, before dismissing Logia.".into(),
+            );
+        }
+        action()
+    }
+}
 #[derive(Clone, Serialize)]
 struct Update {
     generation: u64,
@@ -218,7 +229,12 @@ mod tests {
             finishing: true,
         })));
         let started = Instant::now();
+        assert!(
+            sessions.when_idle(|| Ok(())).is_err(),
+            "active recognition cannot be hidden"
+        );
         assert_eq!(terminate(&sessions).unwrap(), 8);
+        assert!(sessions.when_idle(|| Ok(())).is_ok());
         assert!(started.elapsed() < Duration::from_secs(2));
         assert!(child.lock().unwrap().try_wait().unwrap().is_some());
         let state = sessions.0.lock().unwrap();

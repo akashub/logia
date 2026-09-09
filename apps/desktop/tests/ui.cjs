@@ -20,6 +20,7 @@ const assert = require('node:assert/strict');
         async invoke(command, args) {
           if (command === 'plugin:event|listen') { events.set(args.event, args.handler); return args.handler; }
           if (command === 'model_ready') return true;
+          if (command === 'show_main_window' || command === 'hide_main_window') return;
           if (command === 'register_shortcut') return '⌘ ⇧ Space';
           if (command === 'set_floating') return;
           if (command === 'warmup_recognizer') { window.completePreparation = () => window.testEvent({ type: 'stopped' }); return generation; }

@@ -10,6 +10,7 @@ mod shortcut_edge;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 use tauri::Manager;
+static EXIT_CODE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(2);
 
 pub fn run() {
     let fixture_path = std::env::args()
@@ -23,6 +24,7 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(desktop_window::WindowMode::default())
         .setup(move |app| {
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 let result = check(&handle, &fixture_path);
@@ -30,12 +32,15 @@ pub fn run() {
                     Ok(()) => println!("PASS: native shortcut registration; background and minimized reveal preserve foreground; floating geometry restores."),
                     Err(error) => eprintln!("FAIL: {error}"),
                 }
-                handle.exit(if result.is_ok() { 0 } else { 1 });
+                let code = if result.is_ok() { 0 } else { 1 };
+                EXIT_CODE.store(code, std::sync::atomic::Ordering::SeqCst);
+                handle.exit(code);
             });
             Ok(())
         })
         .run(context)
         .expect("launch window checks");
+    std::process::exit(EXIT_CODE.load(std::sync::atomic::Ordering::SeqCst));
 }
 
 fn check(app: &tauri::AppHandle, fixture_path: &str) -> Result<(), String> {
