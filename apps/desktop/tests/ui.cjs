@@ -20,6 +20,8 @@ const assert = require('node:assert/strict');
         async invoke(command, args) {
           if (command === 'plugin:event|listen') { events.set(args.event, args.handler); return args.handler; }
           if (command === 'model_ready') return true;
+          if (command === 'register_shortcut') return '⌘ ⇧ Space';
+          if (command === 'set_floating') return;
           if (command === 'warmup_recognizer') { window.completePreparation = () => window.testEvent({ type: 'stopped' }); return generation; }
           if (command === 'start_recording') { window.startCount++; generation++; setTimeout(() => window.testEvent({ type: 'listening' }), 20); return generation; }
           if (command === 'stop_recording') {
@@ -34,6 +36,7 @@ const assert = require('node:assert/strict');
     });
     await page.goto(process.env.LOGIA_UI_URL || 'http://127.0.0.1:1420');
     await page.getByRole('button', { name: 'Preparing voice model…', exact: true }).waitFor();
+    assert.equal(await page.getByRole('button', { name: 'Float window', exact: true }).count(), 1, 'native preview offers a floating window');
     assert(await page.getByRole('button', { name: 'Preparing voice model…', exact: true }).isDisabled());
     assert.equal(await page.evaluate(() => window.startCount), 0, 'preparation must never start recording');
     await page.evaluate(() => window.completePreparation());

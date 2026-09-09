@@ -7,7 +7,7 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc && vite build",
     "tauri": "tauri",
-    "test:ui": "node tests/ui.cjs",
+    "test:ui": "node tests/ui.cjs && node tests/floating.cjs",
     "test:transcript": "node --test tests/transcript.test.ts"
   },
   "dependencies": {

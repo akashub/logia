@@ -3,11 +3,13 @@ import { createRoot } from 'react-dom/client';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { TranscriptEditor } from './transcript-editor';
+import { useDictationWindow } from './use-dictation-window';
 import '@fontsource/archivo/400.css';
 import '@fontsource/archivo/500.css';
 import '@fontsource/newsreader/400.css';
 import '@fontsource/newsreader/400-italic.css';
 import './style.css';
+import './floating.css';
 
 type Phase = 'checking' | 'setup' | 'downloading' | 'warming' | 'ready' | 'loading' | 'recording' | 'finishing' | 'canceling';
 type Update = { generation: number; event: { type: string; text?: string; message?: string } };
@@ -22,8 +24,11 @@ function App() {
   const [complete, setComplete] = useState(false);
   const [dark, setDark] = useState(false);
   const generation = useRef(0);
+  const controlIntent = useRef(0);
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
+  const windowView = useDictationWindow(native, () => void toggleFromShortcut());
+  function transition(next: Phase) { phaseRef.current = next; setPhase(next); }
   const active = ['loading','recording','finishing','canceling'].includes(phase);
 
   useEffect(() => {
@@ -36,22 +41,22 @@ function App() {
         generation.current = payload.generation;
         const event = payload.event;
         if (phaseRef.current === 'canceling' && event.type !== 'stopped') return;
-        if (event.type === 'loading' && phaseRef.current !== 'warming') setPhase('loading');
-        if (event.type === 'listening') { setPhase('recording'); setSeconds(0); }
+        if (event.type === 'loading' && phaseRef.current !== 'warming') transition('loading');
+        if (event.type === 'listening') { transition('recording'); setSeconds(0); }
         // Empty interim snapshots do not retract the visible paragraph.
         // An authoritative final (including an empty final) still replaces it.
         if (event.type === 'partial' && event.text?.trim()) setText(event.text);
-        if (event.type === 'final') { setText(event.text ?? ''); setComplete(true); setPhase('finishing'); }
+        if (event.type === 'final') { setText(event.text ?? ''); setComplete(true); transition('finishing'); }
         if (event.type === 'error') setError(event.message ?? 'Recognition stopped. Try again.');
-        if (event.type === 'stopped') setPhase('ready');
+        if (event.type === 'stopped') transition('ready');
       });
       const download = await listen<number>('model-progress', ({ payload }) => setProgress(payload));
       if (disposed) { updates(); download(); return; }
       unsubscribers.push(updates, download);
-      try { if (await invoke<boolean>('model_ready')) await prepare(); else setPhase('setup'); }
-      catch (e) { setError(String(e)); setPhase('setup'); }
+      try { if (await invoke<boolean>('model_ready')) await prepare(); else transition('setup'); }
+      catch (e) { setError(String(e)); transition('setup'); }
     };
-    void register().catch(() => { if (!disposed) { setError('Could not connect to recognition. Close and reopen Logia.'); setPhase('setup'); } });
+    void register().catch(() => { if (!disposed) { setError('Could not connect to recognition. Close and reopen Logia.'); transition('setup'); } });
     return () => { disposed = true; unsubscribers.forEach(unsubscribe => unsubscribe()); };
   }, [native]);
 
@@ -64,7 +69,7 @@ function App() {
   useEffect(() => { document.documentElement.dataset.theme = dark ? 'dark' : 'light'; }, [dark]);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+      if (!event.repeat && (event.metaKey || event.ctrlKey) && event.key === 'Enter') {
         event.preventDefault();
         if (phase === 'ready') void start();
         if (phase === 'recording') void stop();
@@ -74,35 +79,52 @@ function App() {
     return () => window.removeEventListener('keydown', key);
   }, [phase]);
 
+  async function toggleFromShortcut() {
+    if (phaseRef.current === 'recording') { await stop(); return; }
+    if (phaseRef.current !== 'ready') return;
+    const intent = controlIntent.current;
+    try { if (await windowView.change(true, true) && controlIntent.current === intent) await start(); }
+    catch (e) { setError(String(e)); }
+  }
+  async function changeWindow() {
+    controlIntent.current++;
+    try { await windowView.change(!windowView.floating); }
+    catch (e) { setError(String(e)); }
+  }
+
   async function start() {
-    if (!native || phase !== 'ready') return;
-    setError(''); setText(''); setComplete(false); setCopied(false); setPhase('loading');
+    if (!native || phaseRef.current !== 'ready') return;
+    controlIntent.current++;
+    setError(''); setText(''); setComplete(false); setCopied(false); transition('loading');
     try { generation.current = Math.max(generation.current, await invoke<number>('start_recording')); }
-    catch (e) { setError(String(e)); setPhase('ready'); }
+    catch (e) { setError(String(e)); transition('ready'); }
   }
   async function stop() {
-    setPhase('finishing');
+    if (phaseRef.current !== 'recording') return;
+    controlIntent.current++;
+    transition('finishing');
     try { await invoke('stop_recording'); }
     catch (e) { setError(String(e)); }
   }
   async function cancel() {
+    controlIntent.current++;
     const preparing = phaseRef.current === 'warming';
     phaseRef.current = 'canceling';
-    setPhase('canceling');
+    transition('canceling');
     if (!preparing) { setText(''); setComplete(false); }
     try { await invoke('cancel_recording'); }
     catch (e) { setError(String(e)); }
   }
   async function download() {
-    setPhase('downloading'); setError(''); setProgress(0);
+    transition('downloading'); setError(''); setProgress(0);
     try { await invoke('download_model'); await prepare(); }
-    catch (e) { setError(String(e)); setPhase('setup'); }
+    catch (e) { setError(String(e)); transition('setup'); }
   }
   async function prepare() {
     phaseRef.current = 'warming';
-    setPhase('warming');
+    transition('warming');
     try { generation.current = Math.max(generation.current, await invoke<number>('warmup_recognizer')); }
-    catch (e) { setError(String(e)); setPhase('ready'); }
+    catch (e) { setError(String(e)); transition('ready'); }
   }
   async function copy() {
     try { await invoke('plugin:clipboard-manager|write_text', { text }); setCopied(true); }
@@ -111,8 +133,8 @@ function App() {
   const status = phase === 'recording' ? 'Listening' : phase === 'warming' ? 'Preparing voice model' : phase === 'loading' ? 'Preparing' : phase === 'finishing' ? 'Finishing' : phase === 'canceling' ? 'Stopping' : complete && text ? 'Ready to use' : 'Ready when you are';
   const setup = ['setup','downloading','checking'].includes(phase);
 
-  return <main>
-    <header><div className="wordmark"><span className="brand-pip"/>Logia</div><div className="header-actions"><span>Personal preview</span><button className="quiet" onClick={() => setDark(!dark)}>{dark ? 'Light' : 'Dark'}</button></div></header>
+  return <main data-view={windowView.floating ? 'floating' : 'full'}>
+    <header><div className="wordmark"><span className="brand-pip"/>Logia</div><div className="header-actions"><span className="preview-label">Personal preview</span><button className="quiet" onClick={() => setDark(!dark)}>{dark ? 'Light' : 'Dark'}</button>{native && <button className="quiet window-toggle" disabled={windowView.changing} onClick={() => void changeWindow()}>{windowView.floating ? 'Expand window' : 'Float window'}</button>}</div></header>
     <section className="intro"><h1>Room for your words.</h1><p>Take your time. There’s room for the whole thought.</p></section>
     {setup ? <section className="setup" aria-labelledby="setup-title">
       <span className="setup-mark" aria-hidden="true">a</span>
@@ -129,7 +151,8 @@ function App() {
     </section>}
     {error && <div className="error" role="alert">{error}</div>}
     <footer><p><span className="privacy-dot"/>On-device. No transcript history.</p><p>English preview · up to 60 seconds</p></footer>
-    <p className="footnote">{setup ? 'Your microphone starts only when you choose Record.' : '⌘ Enter to record or stop in this window. Copy your text wherever you need it.'}</p>
+    {native && <div className="shortcut-note">{windowView.shortcut && <><kbd>{windowView.shortcut}</kbd><span>Record / stop from any app</span></>}{windowView.shortcutError && <><span role="alert">{windowView.shortcutError}</span><button className="quiet" onClick={() => void windowView.register()}>Retry shortcut</button></>}</div>}
+    <p className="footnote">{setup ? 'Your microphone starts only when you choose Record.' : 'Copy your words wherever you need them.'}</p>
   </main>;
 }
 createRoot(document.getElementById('root')!).render(<App/>);

@@ -2,10 +2,13 @@
 mod audio_source;
 mod capture;
 mod capture_audio;
+mod desktop_window;
 mod inference_audio;
 mod messages;
 mod model_file;
 mod session;
+mod shortcut;
+mod shortcut_edge;
 mod warmup;
 mod worker;
 
@@ -32,6 +35,8 @@ fn main() {
     }
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .manage(desktop_window::WindowMode::default())
         .manage(model_file::DownloadState(
             std::sync::atomic::AtomicBool::new(false),
         ))
@@ -42,7 +47,9 @@ fn main() {
             session::start_recording,
             session::warmup_recognizer,
             session::stop_recording,
-            session::cancel_recording
+            session::cancel_recording,
+            desktop_window::set_floating,
+            shortcut::register_shortcut
         ])
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::Destroyed) {

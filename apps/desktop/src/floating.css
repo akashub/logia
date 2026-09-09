@@ -1,0 +1,20 @@
+/* Same editor and controls, with room for the paragraph above other apps. */
+.shortcut-note { display:flex; align-items:center; justify-content:center; gap:10px; margin-top:12px; color:var(--muted); font-size:10px; line-height:1.5; }
+.shortcut-note kbd { font:inherit; color:var(--ink); padding:4px 7px; border:1px solid var(--line); border-radius:4px; white-space:nowrap; }
+main[data-view=floating] { max-width:none; padding:16px 18px 12px; }
+[data-view=floating] header { border:0; padding-bottom:15px; }
+[data-view=floating] .wordmark { font-size:26px; gap:8px; }
+[data-view=floating] .intro, [data-view=floating] .preview-label, [data-view=floating] .footnote { display:none; }
+[data-view=floating] .header-actions { gap:4px; }
+[data-view=floating] .workspace-heading { padding:15px 18px 0; }
+[data-view=floating] textarea { height:calc(100dvh - 290px); min-height:160px; padding:18px 20px 12px; font-size:24px; line-height:1.5; }
+[data-view=floating] .session-note { padding:6px 20px; min-height:46px; font-size:10px; }
+[data-view=floating] .controls { padding:12px; gap:4px; flex-wrap:nowrap; }
+[data-view=floating] .controls>div { gap:2px; }
+[data-view=floating] .controls .quiet { padding:8px; font-size:11px; }
+[data-view=floating] .primary { padding:10px 12px; font-size:11px; }
+[data-view=floating] footer { margin-top:4px; font-size:9px; flex-wrap:nowrap; }
+[data-view=floating] .shortcut-note { margin-top:4px; }
+[data-view=floating] .setup { min-height:260px; padding:24px; }
+[data-view=floating] .setup-mark { display:none; }
+[data-view=floating] .error { margin-top:8px; padding:8px 12px; }
