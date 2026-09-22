@@ -1,4 +1,4 @@
-//! Real selected-text writes, exclusively into an owned synthetic fixture.
+//! Current-cursor paste through the Rust bridge, into an owned fixture only.
 //! No audio or microphone modules are compiled into this executable.
 #[allow(dead_code)]
 #[path = "../../src/target.rs"]
@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 static EXIT: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(2);
-const TEXT: &str = "Hello, café.\nAnother thought.";
+const TEXT: &str = "Hello, café.";
 
 pub fn run() {
     let fixture = std::env::args()
@@ -24,7 +24,7 @@ pub fn run() {
         std::thread::spawn(move || {
             let result = check(&handle, &fixture);
             match &result {
-                Ok(()) => println!("PASS: real selected-text replacement; changed field/selection, stale handle, secure/read-only, canceled, duplicate and invalid attempts refused; stale cancel preserves new target."),
+                Ok(()) => println!("PASS: current-cursor paste and clipboard fallback; canceled, duplicate and invalid attempts refused; stale cancel preserves new session."),
                 Err(error) => eprintln!("FAIL: {error}"),
             }
             let code = i32::from(result.is_err());
@@ -98,37 +98,41 @@ fn check(app: &tauri::AppHandle, path: &str) -> Result<(), String> {
         };
         command("delivery-select")?;
         let token = armed(app)?;
-        send(app, token, TEXT, "sent")?;
-        send(app, token, TEXT, "copy")?;
+        send(app, token, TEXT, "dispatched")?;
+        send(app, token, TEXT, "copy-required")?;
+        std::thread::sleep(Duration::from_millis(150));
         command("assert-sent")?;
         for change in ["delivery-move", "second", "recreate", "readonly", "secure"] {
             command("delivery-select")?;
             let token = armed(app)?;
             command(change)?;
-            send(app, token, TEXT, "copy")?;
-            command(if change == "recreate" {
-                "assert-recreated"
-            } else {
-                "assert-original"
+            send(app, token, TEXT, if change == "secure" { "copied" } else { "dispatched" })?;
+            std::thread::sleep(Duration::from_millis(150));
+            command(match change {
+                "delivery-move" => "assert-moved",
+                "recreate" => "assert-recreated-delivered",
+                _ => "assert-original",
             })?;
         }
         for unsupported in ["readonly", "secure"] {
             command("delivery-select")?;
             command(unsupported)?;
-            if capture(app)?.token != "0" {
-                return Err("Unsupported field was armed".into());
-            }
+            let token = armed(app)?; // Session arming does not choose a field.
+            send(app, token, TEXT, if unsupported == "secure" { "copied" } else { "dispatched" })?;
+            std::thread::sleep(Duration::from_millis(150));
+            command("assert-original")?;
         }
         command("delivery-select")?;
         let old = armed(app)?;
         let new = armed(app)?;
         on_main(app, move || target::discard(old))?;
-        send(app, new, TEXT, "sent")?;
+        send(app, new, TEXT, "dispatched")?;
+        std::thread::sleep(Duration::from_millis(150));
         command("assert-sent")?;
         command("delivery-select")?;
         let token = armed(app)?;
         on_main(app, move || target::discard(token))?;
-        send(app, token, TEXT, "copy")?;
+        send(app, token, TEXT, "copy-required")?;
         command("assert-original")?;
         for text in [
             "".into(),
@@ -138,8 +142,8 @@ fn check(app: &tauri::AppHandle, path: &str) -> Result<(), String> {
         ] {
             command("delivery-select")?;
             let token = armed(app)?;
-            send(app, token, &text, "copy")?;
-            send(app, token, TEXT, "copy")?;
+            send(app, token, &text, "copy-required")?;
+            send(app, token, TEXT, "copy-required")?;
             command("assert-original")?;
         }
         Ok(())

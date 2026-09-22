@@ -29,7 +29,9 @@ import AppKit
     func handle(_ command: String) {
         if command == "quit" { NSApp.terminate(nil); return }
         if command.hasPrefix("assert-") {
-            let expected = command == "assert-sent" ? "Before Hello, café.\nAnother thought. after" :
+            let expected = command == "assert-sent" ? "Before Hello, café. after" :
+                command == "assert-moved" ? "Hello, café.Before OLD after" :
+                command == "assert-recreated-delivered" ? "Hello, café.First synthetic text area" :
                 command == "assert-recreated" ? "First synthetic text area" : "Before OLD after"
             FileHandle.standardOutput.write(Data((first.string == expected ? "pass\n" : "fail\n").utf8))
             return
@@ -72,6 +74,11 @@ import AppKit
     @MainActor static func main() {
         let app = NSApplication.shared
         app.setActivationPolicy(.regular)
+        let menu = NSMenu(), edit = NSMenu(), appItem = NSMenuItem(), editItem = NSMenuItem()
+        appItem.submenu = NSMenu(); menu.addItem(appItem)
+        editItem.submenu = edit; menu.addItem(editItem)
+        edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        app.mainMenu = menu
         let fixture = Fixture()
         DispatchQueue.global().async {
             while let command = readLine() {

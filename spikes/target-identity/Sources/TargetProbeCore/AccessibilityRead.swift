@@ -1,4 +1,5 @@
 import ApplicationServices
+import Carbon
 
 public struct CaptureFailure: Error, CustomStringConvertible {
     public let description: String
@@ -32,7 +33,7 @@ enum AccessibilityRead {
         return unsafeDowncast(result, to: AXUIElement.self)
     }
 
-    static func requireEditable(_ field: AXUIElement) throws {
+    static func requireEditable(_ field: AXUIElement, terminal: Bool = false) throws {
         guard let role = try value(field, kAXRoleAttribute) as? String,
               role == kAXTextFieldRole || role == kAXTextAreaRole else {
             throw CaptureFailure("not-a-text-field")
@@ -44,6 +45,12 @@ enum AccessibilityRead {
         } catch let error as CaptureFailure where error.code == .noValue || error.code == .attributeUnsupported {
             // Ordinary text areas legitimately have no subrole. Transport errors
             // still propagate; absence is not interchangeable with a failed read.
+        }
+        if terminal && role == kAXTextAreaRole {
+            guard !IsSecureEventInputEnabled() else { throw CaptureFailure("secure-input-active") }
+            // Terminal exposes its input/scrollback surface as AX read-only.
+            // It accepts keyboard paste, never an AX value write.
+            return
         }
         var settable: DarwinBoolean = false
         let code = AXUIElementIsAttributeSettable(field, kAXValueAttribute as CFString, &settable)

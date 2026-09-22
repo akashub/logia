@@ -1,0 +1,13 @@
+.logia-symbol {
+  display:inline-block;
+  width:32px;
+  height:32px;
+  flex:none;
+  background:currentColor;
+  mask:url('./brand/mark.svg') center / contain no-repeat;
+  -webkit-mask:url('./brand/mark.svg') center / contain no-repeat;
+}
+.wordmark .logia-symbol { margin-left:-6px; }
+.setup .logia-symbol { width:72px; height:72px; color:var(--held); }
+[data-view=floating] .wordmark .logia-symbol { width:28px; height:28px; }
+[data-view=floating] .setup .logia-symbol { display:none; }

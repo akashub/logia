@@ -53,14 +53,7 @@ pub fn hide_main_window(
 }
 
 fn icon() -> tauri::image::Image<'static> {
-    // Temporary monochrome waveform; the forthcoming brand mark replaces it.
-    let mut rgba = vec![0; 22 * 22 * 4];
-    for (column, height) in [6usize, 12, 18, 12, 6].into_iter().enumerate() {
-        for x in (2 + column * 4)..(4 + column * 4) {
-            for y in (22 - height) / 2..(22 + height) / 2 {
-                rgba[(y * 22 + x) * 4 + 3] = 255;
-            }
-        }
-    }
-    tauri::image::Image::new_owned(rgba, 22, 22)
+    // Retina source; macOS scales the template to the menu bar and tints it.
+    let rgba: &[u8; 44 * 44 * 4] = include_bytes!("../icons/tray.rgba");
+    tauri::image::Image::new(rgba, 44, 44)
 }

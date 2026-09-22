@@ -16,6 +16,9 @@ fn build_target_bridge() {
     };
     println!("cargo:rerun-if-changed={}", core.display());
     println!("cargo:rerun-if-changed=native/TargetBridge.swift");
+    println!("cargo:rerun-if-changed=native/TargetPreparation.swift");
+    println!("cargo:rerun-if-changed=native/OverlayPanel.swift");
+    println!("cargo:rerun-if-changed=native/Permissions.swift");
     let sources = std::fs::read_dir(core)
         .unwrap()
         .map(|entry| entry.unwrap().path())
@@ -35,6 +38,9 @@ fn build_target_bridge() {
         .arg(format!("{arch}-apple-macosx14.0"))
         .args(sources)
         .arg("native/TargetBridge.swift")
+        .arg("native/TargetPreparation.swift")
+        .arg("native/OverlayPanel.swift")
+        .arg("native/Permissions.swift")
         .arg("-o")
         .arg(out.join("liblogia_target.a"))
         .status()
@@ -53,4 +59,7 @@ fn build_target_bridge() {
     println!("cargo:rustc-link-lib=static=logia_target");
     println!("cargo:rustc-link-lib=framework=AppKit");
     println!("cargo:rustc-link-lib=framework=ApplicationServices");
+    println!("cargo:rustc-link-lib=framework=Carbon");
+    println!("cargo:rustc-link-lib=framework=WebKit");
+    println!("cargo:rustc-link-lib=framework=AVFoundation");
 }

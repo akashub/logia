@@ -56,6 +56,7 @@ pub fn start_recording(
     app: tauri::AppHandle,
     sessions: tauri::State<'_, Sessions>,
 ) -> Result<u64, String> {
+    crate::permissions::require_microphone()?;
     launch(app, sessions, "--recognizer", target)
 }
 

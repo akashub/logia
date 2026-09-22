@@ -93,18 +93,40 @@ pub fn send(token: u64, text: &str) -> &'static str {
     }
     if text.len() > 65_536 {
         discard(token);
-        return "copy";
+        return "copy-required";
     }
     #[cfg(target_os = "macos")]
     {
-        match unsafe { logia_target_send(token, text.as_ptr(), text.len()) } {
-            0 => "sent",
-            2 => "uncertain",
-            _ => "copy",
-        }
+        native_status(unsafe { logia_target_send(token, text.as_ptr(), text.len()) })
     }
     #[cfg(not(target_os = "macos"))]
     {
         "copy"
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn native_status(result: i32) -> &'static str {
+    match result {
+        0 => "sent",
+        2 => "uncertain",
+        5 => "dispatched",
+        6 => "clipboard-changed",
+        7 => "copied",
+        // Consumed/invalid/unknown native results are final. A frontend copy
+        // would bypass native ownership checks and can overwrite newer data.
+        _ => "copy-required",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn rejected_native_delivery_never_requests_an_async_clipboard_write() {
+        for result in [1, 3, 4, 99] {
+            assert_eq!(super::native_status(result), "copy-required");
+        }
+        assert_eq!(super::native_status(7), "copied");
+        assert_eq!(super::native_status(6), "clipboard-changed");
     }
 }

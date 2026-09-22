@@ -7,8 +7,14 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc && vite build",
     "tauri": "tauri",
-    "test:ui": "node tests/ui.cjs && node tests/floating.cjs",
-    "test:transcript": "node --test tests/transcript.test.ts"
+    "test:ui": "node tests/ui.cjs && node tests/overlay.cjs && node tests/overlay-safety.cjs && node tests/permissions.cjs && node tests/delivery.cjs",
+    "test:transcript": "node --test tests/transcript.test.ts",
+    "icons": "node scripts/export-icons.cjs",
+    "test:unit": "node --test tests/transcript.test.ts tests/preferences.test.ts tests/dictionary.test.ts",
+    "app": "tauri build --debug --bundles app && bash scripts/stable-sign.sh",
+    "app:install": "pnpm app && node scripts/install-app.mjs",
+    "signing:setup": "bash scripts/setup-local-signing.sh --install",
+    "test:install": "node --test tests/install-app.test.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "2.11.0",

@@ -1,0 +1,54 @@
+:root[data-surface=overlay], [data-surface=overlay] body { background:transparent; overflow:hidden; color-scheme:dark; }
+.overlay-host { position:relative; width:100vw; height:100vh; padding:12px; display:flex; align-items:flex-end; justify-content:center; }
+.overlay-host[data-position=top] { align-items:flex-start; }
+.overlay-card { position:relative; flex:none; overflow:hidden; border-radius:14px; padding:12px 16px 8px; background:#0c0e1c; color:#f7f6f2; box-shadow:0 4px 12px #0c0e1c40,inset 0 0 0 1px #ffffff12; transition:width 160ms ease,height 160ms ease,padding 160ms ease,border-radius 160ms ease; }
+.overlay-transcript { width:408px; height:24px; font:400 18px/24px Newsreader,Georgia,serif; white-space:pre-wrap; overflow:auto; scrollbar-width:thin; scrollbar-color:#555569 transparent; scrollbar-gutter:stable; overflow-anchor:none; }
+.overlay-transcript.provisional { color:#f2a03d; font-style:italic; }
+.overlay-row { display:flex; align-items:center; gap:8px; height:20px; margin-top:8px; padding-left:14px; color:#b4b5c1; font:10px/1 Archivo,system-ui,sans-serif; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.overlay-pip { position:absolute; width:6px; height:6px; left:16px; bottom:15px; border-radius:50%; background:#f2a03d; transition:width 160ms ease,height 160ms ease,left 160ms ease,bottom 160ms ease,background 160ms ease; }
+.overlay-spacer { flex:1; }
+.overlay-row button { display:inline-flex; justify-content:center; align-items:center; flex:none; width:20px; height:20px; padding:0; border:0; border-radius:5px; background:transparent; color:#b4b5c1; font:18px/1 Archivo,sans-serif; }
+.overlay-row button:hover:enabled { color:white; background:#ffffff12; }
+.overlay-row .overlay-follow { font-size:14px; }
+.overlay-stop { width:7px; height:7px; border-radius:1.5px; background:currentColor; }
+.overlay-clock { margin-left:3px; }
+.overlay-shortcut { margin-right:4px; }
+.overlay-card[data-rung=idle] { padding:0; border-radius:50%; background:transparent; box-shadow:0 0 0 3px #f2a03d22; transition-duration:300ms; }
+.overlay-card[data-rung=idle] .overlay-pip { width:14px; height:14px; left:0; bottom:0; transition-duration:300ms; }
+.overlay-card[data-rung=idle] .overlay-row { visibility:hidden; }
+.overlay-card[data-rung=armed] { padding:4px 10px 4px 12px; border-radius:16px; }
+.overlay-card[data-rung=armed] .overlay-row { height:24px; margin:0; gap:6px; }
+.overlay-card[data-rung=armed] .overlay-pip { left:12px; bottom:13px; }
+.overlay-card[data-tone=good] .overlay-pip { background:#3e8c7a; }
+.overlay-card[data-tone=bad] .overlay-pip { background:#c25a4a; bottom:57px; }
+.overlay-outcome { width:408px; font:11px/18px Archivo,sans-serif; color:#c3c3ce; margin:12px 0 0; }
+.overlay-recovery { display:flex; gap:8px; align-items:center; height:32px; margin-top:10px; }
+.overlay-recovery button { padding:6px 10px; border:1px solid #3b3d4f; border-radius:5px; background:transparent; color:#f7f6f2; font:11px/18px Archivo,sans-serif; }
+.overlay-recovery .overlay-copy { background:#f2a03d; border-color:#f2a03d; color:#171a2e; }
+.overlay-recovery .overlay-permission { color:#f2a03d; border-color:#6b4c25; }
+.overlay-recovery .overlay-close { width:28px; padding:2px 0; font-size:18px; color:#b4b5c1; }
+.overlay-card button:focus-visible,.overlay-transcript:focus-visible { outline:2px solid #f2a03d; outline-offset:1px; }
+.overlay-connection-error { position:fixed; inset:0; margin:0; padding:12px; background:#0c0e1c; color:#f7f6f2; font:11px/1.4 Archivo,sans-serif; }
+.overlay-card [hidden] { display:none; }
+@media(prefers-reduced-motion:reduce) { .overlay-card,.overlay-pip { transition:none!important; } }
+
+/* claude 2026-09-11: the transcript is the editing surface. Editable and
+   read-only must look like one continuous box, not two different controls. */
+/* Only strip the control chrome. Font, width and colour stay with the
+   .overlay-transcript rule above so the editable box looks identical to the
+   read-only one it replaced. */
+textarea.overlay-transcript {
+  border:0; resize:none; padding:0; margin:0; background:transparent;
+  outline:none; display:block; color:inherit;
+}
+textarea.overlay-transcript:not([readonly]) { cursor:text; }
+textarea.overlay-transcript:focus-visible { outline:1px solid #f2a03d55; outline-offset:4px; border-radius:3px; }
+.overlay-hint { font-size:10px; color:#8b8d9c; white-space:nowrap; }
+
+/* claude 2026-09-11: measured level, not an animation. Flat bars mean silence. */
+.overlay-meter { display:flex; align-items:flex-end; gap:2px; height:11px; flex:none; }
+.overlay-meter i { width:2.5px; border-radius:1px; background:var(--live); display:block; transition:height 70ms linear; }
+.overlay-deaf { color:#e2a094; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+.overlay-warning { margin:8px 0 0; color:#e2a094; font:10px/15px Archivo,system-ui,sans-serif; white-space:normal; }
+/* The status word must yield before the clock and controls do. */
+.overlay-row > [role=status] { overflow:hidden; text-overflow:ellipsis; min-width:0; }

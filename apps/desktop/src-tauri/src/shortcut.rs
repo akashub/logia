@@ -1,26 +1,48 @@
-use super::shortcut_edge::ShortcutEdge;
+#[path = "shortcut_registration.rs"]
+mod registration;
+
+use registration::{Binding, Preset, Registrar, Selection};
+use std::sync::{LazyLock, Mutex};
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
-const SHORTCUT: &str = "CommandOrControl+Shift+Space";
+static SELECTION: LazyLock<Mutex<Selection>> = LazyLock::new(|| Mutex::new(Selection::default()));
 
-#[tauri::command]
-pub fn register_shortcut(app: AppHandle) -> Result<&'static str, String> {
-    // Registered after the webview subscribes. A failed registration leaves
-    // Record/Stop available and can be retried without restarting recognition.
-    if !app.global_shortcut().is_registered(SHORTCUT) {
-        let edge = ShortcutEdge::default();
-        app.global_shortcut()
-            .on_shortcut(SHORTCUT, move |app, _, event| {
-                if edge.accept(event.state == ShortcutState::Pressed) {
+struct NativeRegistrar(AppHandle);
+impl Registrar for NativeRegistrar {
+    fn register(&mut self, preset: Preset, binding: Binding) -> Result<(), ()> {
+        // An unsuccessful rollback may have left this owned registration in
+        // place. It already has the same atomic gate and must not be duplicated.
+        if self.0.global_shortcut().is_registered(preset.shortcut()) {
+            return Ok(());
+        }
+        self.0
+            .global_shortcut()
+            .on_shortcut(preset.shortcut(), move |app, _, event| {
+                if binding.accept(event.state == ShortcutState::Pressed) {
                     let _ = app.emit_to("main", "dictation-shortcut", ());
                 }
             })
-            .map_err(|_| "Could not register the shortcut. It may be in use by another app. Free it, then retry.".to_string())?;
+            .map_err(|_| ())
     }
-    Ok(if cfg!(target_os = "macos") {
-        "⌘ ⇧ Space"
-    } else {
-        "Ctrl Shift Space"
-    })
+    fn unregister(&mut self, preset: Preset) -> Result<(), ()> {
+        self.0
+            .global_shortcut()
+            .unregister(preset.shortcut())
+            .map_err(|_| ())
+    }
+}
+
+#[tauri::command]
+pub fn register_shortcut(app: AppHandle, shortcut: Option<String>) -> Result<&'static str, String> {
+    // The user chose Control+Alt+Space after CommandOrControl+Shift+Space
+    // conflicted with Spotlight. Missing arguments retain that chosen default.
+    let preset = Preset::parse(shortcut.as_deref())?;
+    // Never wait for this lock on the main thread: the plugin may be waiting
+    // for a main-thread registration operation from another command.
+    SELECTION
+        .try_lock()
+        .map_err(|_| "A shortcut change is already in progress. Retry shortly.")?
+        .select(preset, &mut NativeRegistrar(app))?;
+    Ok(preset.label(cfg!(target_os = "macos")))
 }

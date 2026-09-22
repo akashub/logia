@@ -10,7 +10,7 @@ use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 #[derive(serde::Serialize, Clone)]
 struct DeliveryUpdate {
@@ -38,10 +38,18 @@ pub fn read(
                 break;
             }
         }
-        let Ok(event) = serde_json::from_str::<WorkerEvent>(&line) else {
+        let Ok(mut event) = serde_json::from_str::<WorkerEvent>(&line) else {
             failed = true;
             break;
         };
+        // claude 2026-09-11: apply vocabulary rules once, here, before the text
+        // is either delivered or shown. Rules deliberately touch only the final
+        // transcript: rewriting a partial would fight the recognizer while it
+        // is still revising its own hypothesis.
+        if let WorkerEvent::Final { text } = &mut event {
+            let refined = app.state::<crate::dictionary::Dictionary>().apply(text);
+            *text = refined;
+        }
         if !delivery.observe(&event) {
             failed = true;
             break;
@@ -77,7 +85,7 @@ pub fn read(
         }
             else { target::discard(token); "copy" };
         state.target = 0;
-        if status == "sent" || status == "uncertain" {
+        if matches!(status, "sent" | "dispatched" | "copied" | "uncertain") {
             state.delivered = Some(crate::session::DeliveryOutcome { status, text });
         }
         if token != 0 { let _ = main_app.emit("delivery", DeliveryUpdate { generation, status }); }

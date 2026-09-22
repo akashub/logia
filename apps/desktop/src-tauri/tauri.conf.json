@@ -10,10 +10,12 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "title": "Logia",
         "visible": false,
+        "backgroundThrottling": "disabled",
         "width": 940,
         "height": 760,
         "minWidth": 600,
@@ -32,7 +34,15 @@
     ],
     "macOS": {
       "minimumSystemVersion": "14.0",
-      "infoPlist": "Info.plist"
-    }
+      "infoPlist": "Info.plist",
+      "entitlements": "Entitlements.plist"
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
   }
 }

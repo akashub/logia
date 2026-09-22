@@ -3,20 +3,18 @@ import ApplicationServices
 
 // Rust dispatches every entry to the main thread. No Swift object crosses the ABI.
 private var sequence: UInt64 = 0
-private var current: (token: UInt64, snapshot: FocusSnapshot, selection: CFRange)?
+private var current: (token: UInt64, clipboardVersion: Int)?
 
 @_cdecl("logia_target_capture")
 public func targetCapture(_ status: UnsafeMutablePointer<Int32>) -> UInt64 {
     precondition(Thread.isMainThread)
     current = nil
-    status.pointee = 1
-    guard FocusSnapshot.hasPermission else { status.pointee = 2; return 0 }
-    guard let snapshot = try? FocusSnapshot.capture(), !snapshot.belongsToCurrentProcess,
-          let selection = try? snapshot.selection() else { return 0 }
+    // Arm a session, not a field. The user's cursor may move while speaking.
+    // Native clipboard ownership applies even if typing permission is absent.
+    status.pointee = FocusSnapshot.hasPermission ? 0 : 2
     sequence &+= 1
     if sequence == 0 { sequence = 1 }
-    current = (sequence, snapshot, selection)
-    status.pointee = 0
+    current = (sequence, NSPasteboard.general.changeCount)
     return sequence
 }
 
@@ -35,12 +33,20 @@ public func targetSend(_ token: UInt64, _ bytes: UnsafePointer<UInt8>?, _ count:
           let text = String(bytes: UnsafeBufferPointer(start: bytes, count: count), encoding: .utf8) else {
         return DeliveryResult.invalid.rawValue
     }
-    return target.snapshot.send(text, selection: target.selection).rawValue
+    let destination = TerminalInput.allows(text) ? try? PasteDestination.capture() : nil
+    guard let destination else {
+        return VerifiedPaste.copy(text, clipboardVersion: target.clipboardVersion).rawValue
+    }
+    return VerifiedPaste.send(text, to: destination.pid, clipboardVersion: target.clipboardVersion,
+                              verify: destination.isCurrent).rawValue
 }
 
 @_cdecl("logia_target_permission")
 public func targetPermission(_ prompt: Bool) -> Bool {
     precondition(Thread.isMainThread)
-    if !prompt { return AXIsProcessTrusted() }
-    return AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
+    let allowed = prompt
+        ? AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
+        : AXIsProcessTrusted()
+    if allowed { TargetPreparation.start() }
+    return allowed
 }

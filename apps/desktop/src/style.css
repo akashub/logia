@@ -53,11 +53,6 @@ header {
   display:flex;
   align-items:center;
   gap:11px}
-.brand-pip {
-  width:8px;
-  height:8px;
-  background:var(--held);
-  border-radius:50%}
 .header-actions {
   display:flex;
   align-items:center;
@@ -206,12 +201,6 @@ footer p {
   background:var(--panel);
   border:1px solid var(--line);
   border-radius:12px}
-.setup-mark {
-  font-family:Newsreader,Georgia,serif;
-  font-size:74px;
-  line-height:1;
-  color:var(--held);
-  font-style:italic}
 .setup h2 {
   font-family:Newsreader,Georgia,serif;
   font-size:31px;
@@ -256,3 +245,40 @@ footer {
   animation:none!important;
   transition:none!important}
 }
+
+/* claude 2026-09-11: vocabulary rules (R07). */
+.vocabulary-intro { margin:0 0 18px; color:var(--muted); font-size:13px; max-width:62ch; line-height:1.6; }
+.vocabulary-add { display:flex; align-items:flex-end; gap:10px; flex-wrap:wrap; }
+.vocabulary-add label { display:flex; flex-direction:column; gap:5px; font-size:11.5px; color:var(--muted); flex:1; min-width:150px; }
+.vocabulary-add input, .vocabulary-preview input {
+  font:14px Archivo,system-ui,sans-serif; color:var(--ink); background:var(--panel);
+  border:1px solid var(--line); border-radius:7px; padding:8px 10px; width:100%;
+}
+.vocabulary-add input:focus-visible, .vocabulary-preview input:focus-visible { outline:2px solid var(--live); outline-offset:1px; }
+.vocabulary-arrow { color:var(--muted); padding-bottom:9px; font-size:14px; }
+.vocabulary-problem { color:#b34a3b; font-size:12.5px; margin:10px 0 0; }
+:root[data-theme=dark] .vocabulary-problem { color:#eb9588; }
+.vocabulary-empty { color:var(--muted); font-size:13px; margin:18px 0 0; }
+.vocabulary-list { list-style:none; margin:18px 0 0; padding:0; display:flex; flex-direction:column; }
+.vocabulary-list li { display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--line); }
+.vocabulary-spoken { font-family:Newsreader,Georgia,serif; font-size:16px; font-style:italic; }
+.vocabulary-replacement { font:13px ui-monospace,SFMono-Regular,Menlo,monospace; background:var(--panel); border:1px solid var(--line); border-radius:5px; padding:3px 7px; flex:1; }
+.vocabulary-remove { font-size:12px; padding:5px 10px; }
+.vocabulary-preview { margin-top:22px; padding-top:18px; border-top:1px solid var(--line); }
+.vocabulary-preview label { display:flex; flex-direction:column; gap:5px; font-size:11.5px; color:var(--muted); }
+.vocabulary-preview p { margin:12px 0 0; display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; }
+.vocabulary-preview-label { font-size:11.5px; color:var(--muted); }
+.vocabulary-preview-text { font-family:Newsreader,Georgia,serif; font-size:17px; line-height:1.5; }
+
+/* claude 2026-09-14: model catalogue rows. */
+.settings-models { display:flex; flex-direction:column; gap:14px; }
+.settings-model-row { border:1px solid var(--line); border-radius:12px; padding:18px 20px; background:var(--panel); }
+.settings-model-row[data-installed=yes] { border-color:color-mix(in srgb, var(--held) 45%, var(--line)); }
+.settings-model-head { display:flex; align-items:baseline; justify-content:space-between; gap:14px; }
+.settings-model-head h2 { font:400 21px/1.2 Newsreader,Georgia,serif; margin:0; }
+.settings-model-actions { display:flex; gap:8px; margin-top:14px; flex-wrap:wrap; }
+.settings-models .settings-model-meta { margin:6px 0 10px; }
+.settings-models p { margin:0; color:var(--muted); font-size:13px; line-height:1.6; }
+.settings-model-row .settings-model-note { margin-top:10px; font-size:12px; }
+/* The sidebar group label was the one item failing contrast in dark. */
+.settings-nav-label { color:var(--ink); opacity:.62; }

@@ -9,6 +9,11 @@ pub const MAX_SECONDS: u64 = 60;
 pub enum WorkerEvent {
     Loading,
     Listening,
+    // claude 2026-09-11: measured peak amplitude of a captured chunk. Carries
+    // evidence, not decoration: macOS hands a denied microphone silent buffers
+    // rather than an error, and only real samples can distinguish that from a
+    // recognizer that has nothing to say.
+    Level { peak: f32 },
     Partial { text: String },
     Final { text: String },
     Error { message: String },

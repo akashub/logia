@@ -90,6 +90,8 @@ pub fn run(model_path: &Path, audio: Option<&Path>) -> Result<(), String> {
     let mut inference_audio = InferenceAudio::default();
     let mut previous = String::new();
     let mut samples = 0usize;
+    let mut level_sent = Instant::now();
+    let mut loudest = 0f32;
     loop {
         if cancel.is_cancelled() {
             source.stop();
@@ -108,6 +110,15 @@ pub fn run(model_path: &Path, audio: Option<&Path>) -> Result<(), String> {
         if samples > rate * MAX_SECONDS as usize + CHUNK {
             source.stop();
             break;
+        }
+        // Throttled so the pipe carries roughly 16 level updates a second at
+        // most, regardless of the device's callback size.
+        let peak = chunk.iter().fold(0f32, |top, s| top.max(s.abs()));
+        loudest = loudest.max(peak);
+        if level_sent.elapsed() >= std::time::Duration::from_millis(60) {
+            level_sent = std::time::Instant::now();
+            emit(&WorkerEvent::Level { peak: loudest })?;
+            loudest = 0.0;
         }
         pending.extend_from_slice(&chunk);
         while pending.len() >= CHUNK {

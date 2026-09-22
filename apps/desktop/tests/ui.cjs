@@ -1,110 +1,103 @@
-// Simulated native events test the UI contract; real ASR is checked separately.
+// Real settings + voice-test UI, with native recognition/clipboard IPC simulated.
 const { chromium } = require('playwright');
 const assert = require('node:assert/strict');
-
+const { openFixture } = require('./native-fixture.cjs');
 (async () => {
   const browser = await chromium.launch({ headless: true });
   try {
-    const page = await browser.newPage({ viewport: { width: 940, height: 760 } });
-    const errors = [];
-    page.on('pageerror', error => errors.push(error.message));
-    await page.addInitScript(() => {
-      let id = 0, generation = 0;
-      const callbacks = new Map(), events = new Map();
-      window.isTauri = true;
-      window.startCount = 0;
-      window.testEvent = (event, gen = generation) => callbacks.get(events.get('recognition'))({ payload: { generation: gen, event } });
-      window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
-      window.__TAURI_INTERNALS__ = {
-        transformCallback(callback) { callbacks.set(++id, callback); return id; },
-        async invoke(command, args) {
-          if (command === 'plugin:event|listen') { events.set(args.event, args.handler); return args.handler; }
-          if (command === 'model_ready') return true;
-          if (command === 'show_main_window' || command === 'hide_main_window') return;
-          if (command === 'register_shortcut') return '⌘ ⇧ Space';
-          if (command === 'set_floating') return;
-          if (command === 'warmup_recognizer') { window.completePreparation = () => window.testEvent({ type: 'stopped' }); return generation; }
-          if (command === 'start_recording') { window.startCount++; generation++; setTimeout(() => window.testEvent({ type: 'listening' }), 20); return generation; }
-          if (command === 'stop_recording') {
-            window.testEvent({ type: 'final', text: 'Keep the thought moving.' });
-            window.testEvent({ type: 'stopped' }); return;
-          }
-          if (command === 'cancel_recording') { generation++; window.testEvent({ type: 'stopped' }); return; }
-          if (command === 'plugin:clipboard-manager|write_text') { window.copiedText = args.text; return; }
-          throw new Error(`Unexpected command: ${command}`);
-        }
-      };
-    });
-    await page.goto(process.env.LOGIA_UI_URL || 'http://127.0.0.1:1420');
-    await page.getByRole('button', { name: 'Preparing voice model…', exact: true }).waitFor();
-    assert.equal(await page.getByRole('button', { name: 'Float window', exact: true }).count(), 1, 'native preview offers a floating window');
-    assert(await page.getByRole('button', { name: 'Preparing voice model…', exact: true }).isDisabled());
-    assert.equal(await page.evaluate(() => window.startCount), 0, 'preparation must never start recording');
-    await page.evaluate(() => window.completePreparation());
+    const { main: page, overlay, state, recognition, emit, url } = await openFixture(browser);
+    const errors = []; page.on('pageerror', error => errors.push(error.message));
+    await page.getByRole('heading', { name: 'General', exact: true }).waitFor();
+    // claude 2026-09-10: assert the General page's own warming banner. The
+    // "Preparing local recognition" note lives on the Models page, so this
+    // timed out on the General page the suite actually opens.
+    await page.getByText('Loading local recognition').waitFor();
+    assert.equal(state.starts, 0, 'startup never records');
+    await recognition({ type: 'stopped' });
+    await page.screenshot({ path: '/tmp/logia-settings-general.png' });
+    await page.getByRole('combobox', { name: 'Overlay position' }).selectOption('top');
+    await page.waitForTimeout(80); assert.equal(state.size.position, 'top');
+    await page.getByRole('switch', { name: 'Show idle indicator' }).click();
+    await page.waitForTimeout(80); assert(state.calls.includes('hide_overlay'));
+    await page.getByRole('combobox', { name: 'Theme', exact: true }).selectOption('dark');
+    assert.equal(await page.locator('html').getAttribute('data-theme'), 'dark');
+    await page.getByRole('combobox', { name: 'Global shortcut' }).selectOption('Alt+Shift+Space');
+    state.conflict = true;
+    await page.getByRole('button', { name: 'Apply', exact: true }).click();
+    await page.getByRole('alert').filter({ hasText: 'Shortcut is already in use' }).waitFor();
+    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('logia.preferences.v1')).shortcut), 'Control+Alt+Space', 'failed binding is never persisted');
+    state.conflict = false;
+    await page.getByRole('button', { name: 'Apply', exact: true }).click();
+    await page.waitForFunction(() => JSON.parse(localStorage.getItem('logia.preferences.v1')).shortcut === 'Alt+Shift+Space');
+    await page.reload(); await page.getByRole('heading', { name: 'General', exact: true }).waitFor();
+    assert.equal(await page.getByRole('combobox', { name: 'Overlay position' }).inputValue(), 'top');
+    // claude 2026-09-11: the idle dot now defaults to off, so the single click
+    // above turns it on. This still checks the choice survived a reload.
+    assert.equal(await page.getByRole('switch', { name: 'Show idle indicator' }).getAttribute('aria-checked'), 'true');
+    await recognition({ type: 'stopped' });
+    await page.getByRole('combobox', { name: 'Theme', exact: true }).selectOption('light');
+    await page.getByRole('button', { name: 'Models', exact: true }).click();
+    await page.getByRole('heading', { name: 'Moonshine Streaming Small', exact: true }).waitFor();
+    await page.screenshot({ path: '/tmp/logia-settings-models.png' });
+    await page.getByRole('button', { name: 'Advanced', exact: true }).click();
+    await page.getByText('No rewriting', { exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Voice test', exact: true }).click();
+    assert.equal(state.starts, 0, 'opening voice test is not permission to open the microphone');
     await page.getByRole('button', { name: 'Start recording', exact: true }).click();
     await page.getByRole('button', { name: 'Stop recording', exact: true }).waitFor();
-    const before = await page.getByRole('textbox', { name: 'Transcript' }).boundingBox();
+    const transcript = page.getByRole('textbox', { name: 'Transcript' });
+    const box = await transcript.boundingBox();
     await page.evaluate(() => {
       window.renderedValues = [];
       const element = document.querySelector('textarea');
       const descriptor = Object.getOwnPropertyDescriptor(element, 'value') || Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
-      Object.defineProperty(element, 'value', {
-        configurable: true, get() { return descriptor.get.call(this); },
-        set(value) { window.renderedValues.push(value); descriptor.set.call(this, value); }
-      });
-      window.testEvent({ type: 'partial', text: 'Keep the thought moving through a whole paragraph.' });
+      Object.defineProperty(element, 'value', { configurable:true, get() { return descriptor.get.call(this); }, set(value) { window.renderedValues.push(value); descriptor.set.call(this, value); } });
     });
-    await page.waitForFunction(() => document.querySelector('textarea').value === 'Keep the thought moving through a whole paragraph.');
-    assert(await page.evaluate(() => window.renderedValues.some(value => value.length > 0 && value.length < 'Keep the thought moving through a whole paragraph.'.length)), 'new words should appear progressively, not as one replacement');
-    await page.evaluate(() => window.testEvent({ type: 'partial', text: '' }));
-    await page.waitForTimeout(250); // Exceed the entire bounded presentation window.
-    assert.equal(await page.getByRole('textbox', { name: 'Transcript' }).inputValue(), 'Keep the thought moving through a whole paragraph.', 'empty provisional update must not erase the paragraph');
-    const paused = await page.getByRole('textbox', { name: 'Transcript' }).boundingBox();
-    assert.deepEqual(paused, before, 'pauses must not resize or move the writing surface');
-    assert.equal(await page.locator('.breathing').count(), 0, 'no duplicate collapsing caption bubble');
-    await page.evaluate(() => window.testEvent({ type: 'partial', text: 'Keep the thought' }));
-    await page.waitForFunction(() => document.querySelector('textarea').value === 'Keep the thought');
-    assert(await page.getByRole('button', { name: 'Copy partial' }).isDisabled());
-    await page.screenshot({ path: process.env.LOGIA_UI_SCREENSHOT || '/tmp/logia-preview-speaking.png', animations: 'disabled' });
-    // A long paragraph follows incoming words until the reader scrolls away.
-    const paragraph = 'We can pause, think, and keep speaking. The whole paragraph stays in one place while the next sentence arrives. '.repeat(12);
-    await page.evaluate(text => window.testEvent({ type: 'partial', text }), paragraph);
+    const short = 'Keep the thought moving through a whole paragraph.';
+    await recognition({ type: 'partial', text: short });
+    await page.waitForFunction(text => document.querySelector('textarea').value === text, short);
+    assert(await page.evaluate(text => window.renderedValues.some(value => value.length > 0 && value.length < text.length), short));
+    await recognition({ type: 'partial', text: '' }); await page.waitForTimeout(180);
+    assert.equal(await transcript.inputValue(), short);
+    const paragraph = 'We can pause, think, and keep speaking. The whole paragraph stays here. '.repeat(30);
+    await recognition({ type:'partial', text:paragraph });
     await page.waitForFunction(text => document.querySelector('textarea').value === text, paragraph);
-    assert(await page.evaluate(() => { const e = document.querySelector('textarea'); return e.scrollTop > 0 && e.scrollHeight - e.clientHeight - e.scrollTop < 48; }));
-    await page.getByRole('textbox', { name: 'Transcript' }).evaluate(e => { e.scrollTop = 0; e.dispatchEvent(new Event('scroll')); });
-    await page.getByRole('button', { name: 'Follow latest words ↓' }).waitFor();
-    await page.evaluate(text => window.testEvent({ type: 'partial', text: text + 'Another thought follows.' }), paragraph);
-    await page.waitForFunction(text => document.querySelector('textarea').value === text + 'Another thought follows.', paragraph);
-    assert.equal(await page.getByRole('textbox', { name: 'Transcript' }).evaluate(e => e.scrollTop), 0, 'new words must not pull the reader away from earlier text');
-    await page.getByRole('button', { name: 'Follow latest words ↓' }).click();
-    assert(await page.getByRole('textbox', { name: 'Transcript' }).evaluate(e => e.scrollTop > 0));
-    await page.getByRole('button', { name: 'Stop recording', exact: true }).click();
-    await page.getByRole('button', { name: 'Copy text' }).click();
-    assert.deepEqual(await page.getByRole('textbox', { name: 'Transcript' }).boundingBox(), before, 'Stop preserves paragraph geometry');
-    assert.equal(await page.evaluate(() => window.copiedText), 'Keep the thought moving.');
-    await page.getByRole('textbox', { name: 'Transcript' }).fill('Edited final text.');
-    await page.getByRole('button', { name: 'Copy text' }).click();
-    assert.equal(await page.evaluate(() => window.copiedText), 'Edited final text.');
-    await page.getByRole('button', { name: 'Start recording', exact: true }).click();
-    await page.getByRole('button', { name: 'Stop recording', exact: true }).waitFor();
-    await page.evaluate(() => window.testEvent({ type: 'partial', text: 'Discard this long pending stream of words before its presentation finishes.' }));
-    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
-    await page.getByRole('button', { name: 'Start recording', exact: true }).waitFor();
-    await page.evaluate(() => window.testEvent({ type: 'final', text: 'Stale text must not return' }, 2));
-    await page.waitForTimeout(180);
-    assert.equal(await page.getByRole('textbox', { name: 'Transcript' }).inputValue(), '');
-    await page.emulateMedia({ reducedMotion: 'reduce' });
-    await page.getByRole('button', { name: 'Start recording', exact: true }).click();
-    await page.getByRole('button', { name: 'Stop recording', exact: true }).waitFor();
-    await page.evaluate(() => { window.renderedValues = []; window.testEvent({ type: 'partial', text: 'Reduced motion shows received text immediately.' }); });
+    await transcript.evaluate(e => { e.scrollTop = 0; e.dispatchEvent(new Event('scroll')); });
+    await recognition({ type:'partial', text:paragraph + 'Another thought.' }); await page.waitForTimeout(180);
+    assert.equal(await transcript.evaluate(e => e.scrollTop), 0);
+    await page.getByRole('button', { name:'Follow latest words ↓' }).click(); assert(await transcript.evaluate(e => e.scrollTop > 0));
+    await page.getByRole('button', { name:'Stop recording', exact:true }).click();
+    await recognition({ type:'final', text:'Keep the thought moving.' }); await recognition({ type:'stopped' });
+    // claude 2026-09-11: a finished session that could not be typed into now
+    // reaches the clipboard on its own, so there is no Copy click to make here.
+    await page.getByRole('button', { name:'Copied', exact:true }).waitFor();
+    assert.equal(state.copied, 'Keep the thought moving.');
+    assert.deepEqual(await transcript.boundingBox(), box);
+    await transcript.fill('Edited final text.'); await page.getByRole('button', { name:'Copied', exact:true }).waitFor({ state:'hidden' });
+    await page.getByRole('button', { name:'Copy text' }).click(); assert.equal(state.copied, 'Edited final text.');
+    await page.getByRole('button', { name:'Start recording', exact:true }).click();
+    await page.getByRole('button', { name:'Stop recording', exact:true }).waitFor();
+    const canceledGeneration = state.generation;
+    await recognition({ type:'partial', text:'Discard this pending stream of words.' });
+    await page.getByRole('button', { name:'Cancel', exact:true }).click();
+    await page.getByRole('button', { name:'Start recording', exact:true }).waitFor();
+    await emit('recognition', { generation:canceledGeneration, event:{ type:'final', text:'Stale text must not return' } });
+    await page.waitForTimeout(180); assert.equal(await transcript.inputValue(), '');
+    await page.emulateMedia({ reducedMotion:'reduce' }); await overlay.emulateMedia({ reducedMotion:'reduce' });
+    await page.getByRole('button', { name:'Start recording', exact:true }).click();
+    await page.getByRole('button', { name:'Stop recording', exact:true }).waitFor();
+    await page.evaluate(() => { window.renderedValues = []; });
+    await recognition({ type:'partial', text:'Reduced motion shows received text immediately.' });
     await page.waitForFunction(() => document.querySelector('textarea').value === 'Reduced motion shows received text immediately.');
     assert.deepEqual(await page.evaluate(() => window.renderedValues.filter(Boolean)), ['Reduced motion shows received text immediately.']);
-    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
-    await page.getByRole('button', { name: 'Dark', exact: true }).click();
-    assert.equal(await page.locator('html').getAttribute('data-theme'), 'dark');
-    await page.setViewportSize({ width: 600, height: 600 });
+    await page.getByRole('button', { name:'Cancel', exact:true }).click();
+    await page.setViewportSize({ width:600, height:600 });
+    await page.getByRole('button', { name:'General', exact:true }).click();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    await page.goto(`${url}?fail-listener`);
+    await page.getByText('Could not connect the shortcut. Quit and reopen Logia.').waitFor();
+    assert.equal(await page.getByRole('button', { name:'Retry shortcut' }).count(), 0);
     assert.deepEqual(errors, []);
-    console.log('Passed: progressive words, pause/Stop layout, empty interim, scroll ownership, final/edit/copy, Cancel/stale events, reduced motion, theme and narrow layout.');
+    console.log('Passed: settings/preferences, shortcut failure persistence, model state, deliberate test, progressive text/scroll, copy/edit, stale Cancel, reduced motion, narrow layout, listener failure.');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type MutableRefObject } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
-type Status = 'copy' | 'permission' | 'armed' | 'sending' | 'sent' | 'uncertain';
+import type { DeliveryStatus as Status } from './dictation-types';
 export type CapturedTarget = { token: string; status: Status };
 
 export function useDelivery(native: boolean, generation: MutableRefObject<number>, phase: MutableRefObject<string>) {
@@ -33,12 +33,19 @@ export function useDelivery(native: boolean, generation: MutableRefObject<number
   return { status, setStatus, capture, discard, permission };
 }
 
-export function deliveryNote(status: Status, complete: boolean) {
-  if (status === 'sending') return 'Sending your words to the original field. Your paragraph stays here.';
-  if (status === 'sent') return 'Text sent to your original field. Your paragraph stays here for reference.';
+export function deliveryNote(status: Status, complete: boolean, copied = false) {
+  if (status === 'sending') return 'Pasting at your text cursor. Your paragraph stays here.';
+  if (status === 'sent') return 'Text sent. Your paragraph stays here for reference.';
+  if (status === 'dispatched') return 'Paste sent. Your text is also on the clipboard.';
+  if (status === 'clipboard-changed') return 'Your clipboard changed while dictating, so Logia left it alone. Your text is here if you want to copy it.';
+  if (status === 'copied') return 'Your text is copied and ready to paste.';
+  if (status === 'copy-required') return 'Logia could not prepare this text for automatic insertion. Your paragraph is here to copy.';
   if (status === 'uncertain') return 'Delivery could not be confirmed. Check your field before copying to avoid a duplicate.';
-  if (status === 'permission') return 'Enable Logia in macOS Accessibility to type into other apps. Your text is available to copy.';
-  if (status === 'armed' && !complete) return 'Use the shortcut again to stop and send to this field. Keep your cursor in place.';
-  if (complete) return 'Copy text to use it in your app. Your paragraph stays here until you clear it or start again.';
+  if (status === 'permission') return 'Typing access is unavailable. Review permissions in Logia Settings. Your text remains here.';
+  if (status === 'armed' && !complete) return 'Use the shortcut again to finish. Logia pastes where your text cursor is.';
+  // A changed field, unreadable selection and unavailable capabilities can all
+  // reach recovery. Do not invent a single cause or claim a failed copy worked.
+  if (complete) return copied ? 'The text wasn’t inserted automatically. It’s copied and ready to paste.'
+    : 'The text wasn’t inserted automatically. Your paragraph is here to copy.';
   return 'Use the global shortcut from a text field to dictate there, or record here and copy.';
 }

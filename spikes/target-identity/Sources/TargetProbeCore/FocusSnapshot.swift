@@ -8,33 +8,42 @@ public struct FocusSnapshot {
     private let application: AXUIElement
     private let window: AXUIElement
     private let field: AXUIElement
+    private let paste: Bool
+    private let terminal: Bool
+    private let clipboardVersion: Int
 
     public static var hasPermission: Bool { AXIsProcessTrusted() }
     public var belongsToCurrentProcess: Bool { pid == ProcessInfo.processInfo.processIdentifier }
 
     // Selection metadata only. Reading the text itself is unnecessary.
     public func selection() throws -> CFRange {
-        try AccessibilityRead.requireEditable(field)
-        var settable: DarwinBoolean = false
-        guard AXUIElementIsAttributeSettable(field, kAXSelectedTextAttribute as CFString, &settable) == .success,
-              settable.boolValue else { throw CaptureFailure("selected-text-not-settable") }
+        try AccessibilityRead.requireEditable(field, terminal: terminal)
+        if !paste {
+            var settable: DarwinBoolean = false
+            guard AXUIElementIsAttributeSettable(field, kAXSelectedTextAttribute as CFString, &settable) == .success,
+                  settable.boolValue else { throw CaptureFailure("selected-text-not-settable") }
+        }
         let value = try AccessibilityRead.value(field, kAXSelectedTextRangeAttribute)
         guard CFGetTypeID(value) == AXValueGetTypeID() else { throw CaptureFailure("selection-type") }
         let ax = unsafeDowncast(value, to: AXValue.self)
         var range = CFRange()
         guard AXValueGetType(ax) == .cfRange, AXValueGetValue(ax, .cfRange, &range),
               range.location >= 0, range.length >= 0 else { throw CaptureFailure("selection-unavailable") }
+        guard !terminal || range.length == 0 else { throw CaptureFailure("terminal-output-selected") }
         return range
     }
 
     public func send(_ text: String, selection expected: CFRange) -> DeliveryResult {
-        var attempt = DeliveryAttempt()
-        return attempt.send(text: text, verify: {
+        guard !terminal || TerminalInput.allows(text) else { return .copyRequired }
+        let verify = {
             guard let fresh = try? Self.capture(), verdict(comparedTo: fresh) == .same,
                   let range = try? fresh.selection(), range.location == expected.location,
-                  range.length == expected.length, stillFocused() else { return .unknown }
-            return .same
-        }, write: {
+                  range.length == expected.length, stillFocused() else { return false }
+            return true
+        }
+        if paste { return VerifiedPaste.send(text, to: pid, clipboardVersion: clipboardVersion, verify: verify) }
+        var attempt = DeliveryAttempt()
+        return attempt.send(text: text, verify: { verify() ? .same : .unknown }, write: {
             // Exact retained field, one selected-text write. Never AXValue or Enter.
             guard (try? AccessibilityRead.bound(field)) != nil else { return false }
             return AXUIElementSetAttributeValue(field, kAXSelectedTextAttribute as CFString, $0 as CFString) == .success
@@ -68,7 +77,8 @@ public struct FocusSnapshot {
         let timeout = AXUIElementSetMessagingTimeout(app, 0.25)
         guard timeout == .success else { throw CaptureFailure("messaging-timeout", code: timeout) }
         let field = try AccessibilityRead.element(app, kAXFocusedUIElementAttribute)
-        try AccessibilityRead.requireEditable(field)
+        let engine = TargetEngine.identify(running)
+        try AccessibilityRead.requireEditable(field, terminal: engine == .terminal)
         guard try AccessibilityRead.value(field, kAXFocusedAttribute) as? Bool == true else {
             throw CaptureFailure("field-not-focused")
         }
@@ -82,14 +92,15 @@ public struct FocusSnapshot {
         }
         let finalField = try AccessibilityRead.element(app, kAXFocusedUIElementAttribute)
         guard CFEqual(field, finalField) else { throw CaptureFailure("field-changed-during-capture") }
-        return FocusSnapshot(pid: pid, processIdentity: identity, application: app, window: window, field: field)
+        return FocusSnapshot(pid: pid, processIdentity: identity, application: app, window: window, field: field,
+                             paste: engine != .native, terminal: engine == .terminal, clipboardVersion: NSPasteboard.general.changeCount)
     }
 
     public func verdict(comparedTo fresh: FocusSnapshot?) -> TargetVerdict {
         guard let fresh else { return .unknown }
         guard processIdentity == fresh.processIdentity else { return .changed }
         // Retained AX handles may be stale even when a fresh lookup succeeds.
-        guard (try? AccessibilityRead.requireEditable(field)) != nil,
+        guard (try? AccessibilityRead.requireEditable(field, terminal: terminal)) != nil,
               (try? AccessibilityRead.value(window, kAXRoleAttribute)) != nil,
               ProcessIdentity.read(pid) == processIdentity else { return .unknown }
         return compare(process: CFEqual(application, fresh.application),

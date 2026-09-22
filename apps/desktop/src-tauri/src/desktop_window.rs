@@ -1,179 +1,166 @@
-use std::sync::Mutex;
-use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, PhysicalSize, WebviewWindow};
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use std::sync::atomic::{AtomicU64, Ordering};
 
-#[derive(Clone)]
-struct Geometry {
-    size: PhysicalSize<u32>,
-    position: PhysicalPosition<i32>,
-    maximized: bool,
-    #[cfg(target_os = "macos")]
-    collection: objc2_app_kit::NSWindowCollectionBehavior,
+// Each reveal/dismiss invalidates edit permits before main-thread work queues.
+static FOCUS_EPOCH: AtomicU64 = AtomicU64::new(0);
+
+pub fn setup_overlay(app: &tauri::App) -> tauri::Result<()> {
+    setup_with_url(app, WebviewUrl::App("index.html?overlay".into()))
 }
 
-#[derive(Default)]
-pub struct WindowMode(Mutex<Option<Geometry>>);
-
-// Native window operations and AppKit access run together on the main thread.
-// The command resolves before the UI can start microphone capture.
-#[tauri::command]
-pub async fn set_floating(app: AppHandle, floating: bool, reveal: bool) -> Result<(), String> {
-    let (sender, receiver) = tokio::sync::oneshot::channel();
-    let handle = app.clone();
-    app.run_on_main_thread(move || {
-        let result = handle
-            .get_webview_window("main")
-            .ok_or_else(|| "The dictation window is unavailable.".to_string())
-            .and_then(|window| change(&window, &handle.state::<WindowMode>(), floating, reveal));
-        let _ = sender.send(result);
-    })
-    .map_err(|e| e.to_string())?;
-    receiver
-        .await
-        .map_err(|_| "The dictation window closed.".to_string())??;
+pub fn setup_with_url(app: &tauri::App, url: WebviewUrl) -> tauri::Result<()> {
+    let window = WebviewWindowBuilder::new(app, "overlay", url)
+        .title("Logia overlay")
+        .inner_size(38., 38.)
+        .visible(false)
+        // Both webviews own the shortcut/acknowledgment bridge while hidden.
+        // Suspending either one can defer Start/Stop until Settings is opened.
+        .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled)
+        .focused(false)
+        .focusable(false)
+        .decorations(false)
+        .transparent(true)
+        .shadow(false)
+        .resizable(false)
+        .skip_taskbar(true)
+        .always_on_top(true)
+        .accept_first_mouse(true)
+        .build()?;
     #[cfg(target_os = "macos")]
-    if reveal {
-        wait_until_visible(&app).await?;
-    }
+    window.with_webview(|view| {
+        // SAFETY: Tauri supplies its live WKWebView on the AppKit main thread.
+        // Swift reparents only that view into a real NSPanel; no class mutation.
+        unsafe { logia_overlay_attach(view.inner()) };
+    })?;
+    #[cfg(not(target_os = "macos"))]
+    let _ = window;
     Ok(())
 }
 
-#[cfg(target_os = "macos")]
-async fn wait_until_visible(app: &AppHandle) -> Result<(), String> {
-    // A previously hidden window joins the active Space asynchronously. Let
-    // AppKit/window-server events run; never sleep on the main thread.
-    for _ in 0..20 {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        let handle = app.clone();
-        app.run_on_main_thread(move || {
-            let visible = handle
-                .get_webview_window("main")
-                .and_then(|window| {
-                    let pointer = window.ns_window().ok()?;
-                    // SAFETY: live Tauri window, on its AppKit main thread.
-                    let native = unsafe { &*pointer.cast::<objc2_app_kit::NSWindow>() };
-                    Some(native.isVisible() && native.isOnActiveSpace())
-                })
-                .unwrap_or(false);
-            let _ = tx.send(visible);
-        })
-        .map_err(|e| e.to_string())?;
-        if rx.await.unwrap_or(false) {
-            return Ok(());
+#[tauri::command]
+pub async fn show_overlay(app: AppHandle) -> Result<(), String> {
+    FOCUS_EPOCH.fetch_add(1, Ordering::SeqCst);
+    native(&app, |app| {
+        #[cfg(target_os = "macos")]
+        {
+            let _ = app;
+            // SAFETY: native() dispatches all bridge entry points to main.
+            if unsafe { logia_overlay_show() } { Ok(()) } else { Err("The recording panel is unavailable.".into()) }
         }
+        #[cfg(not(target_os = "macos"))]
+        app.get_webview_window("overlay").ok_or("The recording panel is unavailable.")?
+            .show().map_err(|e| e.to_string())
+    }).await?;
+    for _ in 0..40 {
+        if native(&app, |app| {
+            #[cfg(target_os = "macos")]
+            { let _ = app; Ok(unsafe { logia_overlay_visible() }) }
+            #[cfg(not(target_os = "macos"))]
+            { app.get_webview_window("overlay").ok_or("The recording panel is unavailable.")?
+                .is_visible().map_err(|e| e.to_string()) }
+        }).await? { return Ok(()); }
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
     }
     Err("Logia could not appear in this Space. Open its window before recording.".into())
 }
 
-fn geometry(window: &WebviewWindow) -> tauri::Result<Geometry> {
-    Ok(Geometry {
-        size: window.inner_size()?,
-        position: window.outer_position()?,
-        maximized: window.is_maximized()?,
+#[tauri::command]
+pub async fn resize_overlay(app: AppHandle, width: f64, height: f64, position: String) -> Result<(), String> {
+    if !width.is_finite() || !height.is_finite() || !(38. ..=900.).contains(&width)
+        || !(38. ..=700.).contains(&height) || !matches!(position.as_str(), "top" | "bottom") {
+        return Err("Invalid recording panel geometry.".into());
+    }
+    native(&app, move |app| {
+        let window = app.get_webview_window("overlay").ok_or("The recording panel is unavailable.")?;
+        // Keep Tauri's hidden backing window bounds consistent with its webview.
+        window.set_size(tauri::LogicalSize::new(width, height)).map_err(|e| e.to_string())?;
         #[cfg(target_os = "macos")]
-        // SAFETY: all geometry calls run on the main thread with a live window.
-        collection: unsafe { (&*window.ns_window()?.cast::<objc2_app_kit::NSWindow>()).collectionBehavior() },
-    })
-}
-
-fn restore(window: &WebviewWindow, saved: &Geometry, floating: bool) -> tauri::Result<()> {
-    window.set_always_on_top(floating)?;
-    window.set_min_size(Some(if floating {
-        LogicalSize::new(480., 460.)
-    } else {
-        LogicalSize::new(600., 600.)
-    }))?;
-    window.unmaximize()?;
-    window.set_size(saved.size)?;
-    window.set_position(saved.position)?;
-    if saved.maximized {
-        window.maximize()?;
-    }
-    #[cfg(target_os = "macos")]
-    // SAFETY: restore is synchronous on the AppKit main thread.
-    unsafe {
-        (&*window.ns_window()?.cast::<objc2_app_kit::NSWindow>())
-            .setCollectionBehavior(saved.collection);
-    }
-    Ok(())
-}
-
-fn change(
-    window: &WebviewWindow,
-    mode: &WindowMode,
-    floating: bool,
-    reveal: bool,
-) -> Result<(), String> {
-    let mut saved = mode
-        .0
-        .lock()
-        .map_err(|_| "The window controls are unavailable.")?;
-    let was_floating = saved.is_some();
-    let before = geometry(window).map_err(|e| e.to_string())?;
-    let apply = || -> tauri::Result<()> {
-        if floating && !was_floating {
-            window.unmaximize()?;
-            window.set_min_size(Some(LogicalSize::new(480., 460.)))?;
-            window.set_size(LogicalSize::new(560., 520.))?;
-            // Keep the smaller window on the current display, clear of its dock.
-            if let Some(monitor) = window.current_monitor()? {
-                let area = monitor.work_area();
-                let size = window.outer_size()?;
-                let x = area.position.x + area.size.width.saturating_sub(size.width + 24) as i32;
-                let y = area.position.y + area.size.height.saturating_sub(size.height + 24) as i32;
-                window.set_position(PhysicalPosition::new(x, y))?;
-            }
-            window.set_always_on_top(true)?;
-        } else if let Some(original) = saved.as_ref().filter(|_| !floating) {
-            restore(window, original, false)?;
-        }
-        if reveal {
-            reveal_without_focus(window)?;
+        unsafe { logia_overlay_resize(width, height, position == "top") };
+        #[cfg(not(target_os = "macos"))]
+        if let Some(monitor) = window.current_monitor().map_err(|e| e.to_string())? {
+            let area = monitor.work_area();
+            let size = window.outer_size().map_err(|e| e.to_string())?;
+            let x = area.position.x + (area.size.width.saturating_sub(size.width) / 2) as i32;
+            let y = area.position.y + if position == "top" { 24 } else { area.size.height.saturating_sub(size.height + 24) as i32 };
+            window.set_position(tauri::PhysicalPosition::new(x, y)).map_err(|e| e.to_string())?;
         }
         Ok(())
-    };
-    if let Err(error) = apply() {
-        let rollback = restore(window, &before, was_floating);
-        return Err(if rollback.is_err() {
-            "Could not restore the window. Expand or reopen Logia before recording.".into()
-        } else {
-            format!("Could not position the dictation window: {error}")
-        });
+    }).await
+}
+
+#[tauri::command]
+pub async fn hide_overlay(app: AppHandle) -> Result<(), String> {
+    FOCUS_EPOCH.fetch_add(1, Ordering::SeqCst);
+    native(&app, |app| {
+        app.state::<crate::session::Sessions>().when_idle(|| {
+            #[cfg(target_os = "macos")]
+            unsafe { logia_overlay_hide() };
+            #[cfg(not(target_os = "macos"))]
+            app.get_webview_window("overlay").ok_or("The recording panel is unavailable.")?
+                .hide().map_err(|e| e.to_string())?;
+            Ok(())
+        })
+    }).await
+}
+
+#[tauri::command]
+pub async fn overlay_editing_token(app: AppHandle) -> Result<u64, String> {
+    let epoch = FOCUS_EPOCH.load(Ordering::SeqCst);
+    native(&app, move |app| {
+        app.state::<crate::session::Sessions>().when_idle(|| {
+            check_edit_permit(&app, Some(epoch))?;
+            Ok(epoch)
+        })
+    }).await
+}
+
+fn check_edit_permit(app: &AppHandle, epoch: Option<u64>) -> Result<(), String> {
+    if epoch != Some(FOCUS_EPOCH.load(Ordering::SeqCst)) {
+        return Err("That recovery session is no longer visible.".into());
     }
-    if floating && !was_floating {
-        *saved = Some(before);
-    }
-    if !floating {
-        *saved = None;
-    }
+    #[cfg(target_os = "macos")]
+    let visible = { let _ = app; unsafe { logia_overlay_visible() } };
+    #[cfg(not(target_os = "macos"))]
+    let visible = app.get_webview_window("overlay").is_some_and(|window| window.is_visible().unwrap_or(false));
+    if !visible { return Err("That recovery session is no longer visible.".into()); }
     Ok(())
+}
+
+#[tauri::command]
+pub async fn set_overlay_editing(app: AppHandle, editing: bool, epoch: Option<u64>) -> Result<(), String> {
+    native(&app, move |app| {
+        let change = || {
+            if editing { check_edit_permit(&app, epoch)?; }
+            #[cfg(target_os = "macos")]
+            // SAFETY: native() dispatches to main; the bridge owns the NSPanel.
+            if !unsafe { logia_overlay_editing(editing) } {
+                return Err("The recording panel is unavailable.".into());
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                let window = app.get_webview_window("overlay").ok_or("The recording panel is unavailable.")?;
+                window.set_focusable(editing).map_err(|e| e.to_string())?;
+                if editing { window.set_focus().map_err(|e| e.to_string())?; }
+            }
+            Ok(())
+        };
+        if editing { app.state::<crate::session::Sessions>().when_idle(change) } else { change() }
+    }).await
+}
+
+async fn native<T: Send + 'static>(app: &AppHandle, action: impl FnOnce(AppHandle) -> Result<T, String> + Send + 'static) -> Result<T, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let handle = app.clone();
+    app.run_on_main_thread(move || { let _ = tx.send(action(handle)); }).map_err(|e| e.to_string())?;
+    rx.await.map_err(|_| "The recording panel closed.".to_string())?
 }
 
 #[cfg(target_os = "macos")]
-fn reveal_without_focus(window: &WebviewWindow) -> tauri::Result<()> {
-    let pointer = window.ns_window()?;
-    // SAFETY: Tauri owns this live NSWindow; caller runs on the AppKit main
-    // thread. Unlike WebviewWindow::show, neither call makes it key or activates
-    // NSApplication. Pointer lifetime is bounded by this synchronous callback.
-    unsafe {
-        let native = &*pointer.cast::<objc2_app_kit::NSWindow>();
-        use objc2_app_kit::NSWindowCollectionBehavior as Behavior;
-        native.setCollectionBehavior(
-            (native.collectionBehavior() & !Behavior::FullScreenPrimary)
-                | Behavior::CanJoinAllSpaces
-                | Behavior::FullScreenAuxiliary,
-        );
-        if native.isMiniaturized() {
-            native.deminiaturize(None);
-        }
-        native.orderFrontRegardless();
-    }
-    Ok(())
-}
-
-#[cfg(not(target_os = "macos"))]
-fn reveal_without_focus(window: &WebviewWindow) -> tauri::Result<()> {
-    // Other desktop platforms have not passed focus-preservation acceptance.
-    window.unminimize()?;
-    window.show()
+extern "C" {
+    fn logia_overlay_attach(webview: *mut std::ffi::c_void);
+    fn logia_overlay_show() -> bool;
+    fn logia_overlay_visible() -> bool;
+    fn logia_overlay_resize(width: f64, height: f64, top: bool);
+    fn logia_overlay_hide();
+    fn logia_overlay_editing(editing: bool) -> bool;
 }
