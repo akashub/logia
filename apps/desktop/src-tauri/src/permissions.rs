@@ -1,7 +1,16 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MicrophoneStatus {
-    NotDetermined, Restricted, Denied, Authorized, Unknown,
+    #[cfg(any(target_os = "macos", test))]
+    NotDetermined,
+    #[cfg(any(target_os = "macos", test))]
+    Restricted,
+    #[cfg(any(target_os = "macos", test))]
+    Denied,
+    #[cfg(any(target_os = "macos", test))]
+    Authorized,
+    #[cfg(any(target_os = "macos", test))]
+    Unknown,
     #[cfg(not(target_os = "macos"))]
     Unsupported,
 }

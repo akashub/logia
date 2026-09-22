@@ -80,6 +80,9 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev cmake clang
       - name: Pinned Rust toolchain
         run: rustup toolchain install 1.95.0 --profile minimal --component clippy
+      - name: Swift 6 toolchain
+        if: runner.os == 'macOS'
+        run: sudo xcode-select --switch /Applications/Xcode_16.2.app/Contents/Developer
       - name: Frontend assets for the native build
         working-directory: apps/desktop
         run: |
@@ -90,7 +93,9 @@ jobs:
       - name: Desktop tests and examples
         run: cargo +1.95.0 test --manifest-path apps/desktop/src-tauri/Cargo.toml --locked --all-targets
       - name: Desktop lint
-        run: cargo +1.95.0 clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --locked --all-targets -- -D warnings
+        run: |
+          echo "::add-matcher::.github/rust.json"
+          cargo +1.95.0 clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --locked --all-targets --message-format=short -- -D warnings
       - name: Build application (no signing or installer)
         run: cargo +1.95.0 build --manifest-path apps/desktop/src-tauri/Cargo.toml --locked
       - name: Swift unit tests (no Accessibility access)
