@@ -1,4 +1,5 @@
 pub use crate::session_control::terminate;
+use tauri::Manager;
 use crate::{messages::WorkerEvent, model_file};
 use serde::Serialize;
 use std::{
@@ -82,9 +83,15 @@ fn launch(
     if state.child.is_some() {
         return Err("Wait for the current recording to stop".into());
     }
+    // Same lock order as model mutations: session lock, then mutation gate.
+    // The worker slot is occupied before releasing this lock, so a file change
+    // can neither race the selected path lookup nor the child startup.
+    if app.state::<crate::model_download::DownloadState>().0.load(std::sync::atomic::Ordering::Acquire) {
+        return Err("Wait for the model download or change to finish".into());
+    }
     let path = model_file::path(&app)?;
     if !path.is_file() {
-        return Err("Download the English model first".into());
+        return Err("Download your selected model first".into());
     }
     let executable = std::env::current_exe().map_err(|_| "Could not locate the recognizer")?;
     let mut child = Command::new(executable)

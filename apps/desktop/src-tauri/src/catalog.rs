@@ -20,8 +20,10 @@ use serde::Serialize;
 pub enum Family {
     /// Emits partial hypotheses while audio arrives. Satisfies D03.
     MoonshineStreaming,
-    /// Nvidia Parakeet driven in its streaming mode.
-    ParakeetStream,
+    /// Parakeet Unified's chunked-attention streaming path.
+    ParakeetBuffered,
+    /// TDT v3 cannot satisfy live captions in this runtime.
+    Offline,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -42,7 +44,7 @@ impl Model {
     pub fn streams(&self) -> bool {
         matches!(
             self.family,
-            Family::MoonshineStreaming | Family::ParakeetStream
+            Family::MoonshineStreaming | Family::ParakeetBuffered
         )
     }
 }
@@ -61,9 +63,31 @@ pub const MODELS: &[Model] = &[
         family: Family::MoonshineStreaming,
     },
     Model {
+        id: "moonshine-streaming-medium",
+        name: "Moonshine Streaming Medium",
+        detail: "A larger English model with live captions. Try it alongside Small.",
+        languages: "English",
+        file: "moonshine-streaming-medium-Q8_0.gguf",
+        url: "https://huggingface.co/handy-computer/moonshine-streaming-medium-gguf/resolve/0f99e956a9e63d591ddd7f2a20dfead255e96c68/moonshine-streaming-medium-Q8_0.gguf",
+        sha256: "f7c9564249b508f6012927ec4f9e536087da53a7047f858ca9975bea5f75299e",
+        bytes: 295_793_568,
+        family: Family::MoonshineStreaming,
+    },
+    Model {
+        id: "parakeet-unified-en",
+        name: "Parakeet Unified EN",
+        detail: "English captions in buffered chunks. Larger download and memory use.",
+        languages: "English",
+        file: "parakeet-unified-en-0.6b-Q8_0.gguf",
+        url: "https://huggingface.co/handy-computer/parakeet-unified-en-0.6b-gguf/resolve/d5249700b2382bf5c5024c2421d101b8db54a629/parakeet-unified-en-0.6b-Q8_0.gguf",
+        sha256: "4b50b6dd862bf6e346929aaf4f5eaacec003bfa3f56462d6c874b41ef2f38795",
+        bytes: 731_357_568,
+        family: Family::ParakeetBuffered,
+    },
+    Model {
         id: "parakeet-v3",
         name: "Parakeet v3",
-        detail: "Stronger on names and technical words. Larger download.",
+        detail: "Batch transcription only in the current runtime. Not offered for live dictation.",
         languages: "English and 24 European languages",
         file: "parakeet-tdt-0.6b-v3-Q8_0.gguf",
         // claude 2026-09-14: UNVERIFIED. This revision, size and digest have not
@@ -74,7 +98,7 @@ pub const MODELS: &[Model] = &[
         url: "",
         sha256: "",
         bytes: 0,
-        family: Family::ParakeetStream,
+        family: Family::Offline,
     },
 ];
 
@@ -88,7 +112,7 @@ pub fn find(id: &str) -> Option<&'static Model> {
 pub fn offerable() -> impl Iterator<Item = &'static Model> {
     MODELS
         .iter()
-        .filter(|model| !model.url.is_empty() && !model.sha256.is_empty() && model.bytes > 0)
+        .filter(|model| model.streams() && !model.url.is_empty() && !model.sha256.is_empty() && model.bytes > 0)
 }
 
 pub fn default_model() -> &'static Model {
@@ -139,5 +163,18 @@ mod tests {
     #[test]
     fn unknown_identifiers_resolve_to_nothing() {
         assert!(find("not-a-model").is_none());
+    }
+
+    #[test]
+    fn offline_parakeet_does_not_claim_live_captions() {
+        assert!(!find("parakeet-v3").unwrap().streams());
+    }
+
+    #[test]
+    fn alternative_streaming_models_are_pinned_and_offerable() {
+        for id in ["moonshine-streaming-medium", "parakeet-unified-en"] {
+            let model = offerable().find(|model| model.id == id).expect("usable streaming alternative");
+            assert!(model.streams());
+        }
     }
 }

@@ -15,14 +15,11 @@ use std::{
     },
     time::Instant,
 };
-use transcribe_cpp::{
-    CancelToken, CommitPolicy, Model, ModelOptions, MoonshineStreamingOptions, RunOptions,
-    StreamExtension, StreamOptions,
-};
+use transcribe_cpp::{CancelToken, Model, ModelOptions};
 
 pub fn run(model_path: &Path, audio: Option<&Path>) -> Result<(), String> {
     emit(&WorkerEvent::Loading)?;
-    model_file::verify(model_path)?;
+    let spec = model_file::verified_model(model_path)?;
     let finish = Arc::new(AtomicBool::new(false));
     let cancel = CancelToken::new();
     if audio.is_none() {
@@ -51,7 +48,7 @@ pub fn run(model_path: &Path, audio: Option<&Path>) -> Result<(), String> {
         if audio.is_some() {
             eprintln!("Model load diagnostic: {error}");
         }
-        "Could not load the English model on this device"
+        "Could not load the selected model on this device"
     })?;
     if !model.capabilities().supports_streaming {
         return Err("The selected model does not support live captions".into());
@@ -60,19 +57,7 @@ pub fn run(model_path: &Path, audio: Option<&Path>) -> Result<(), String> {
         .session()
         .map_err(|_| "Could not start the recognizer")?;
     session.set_cancel_token(&cancel);
-    let options = StreamOptions {
-        commit_policy: CommitPolicy::OnFinalize,
-        family: Some(StreamExtension::MoonshineStreaming(
-            MoonshineStreamingOptions {
-                min_decode_interval_ms: Some(480),
-            },
-        )),
-        ..Default::default()
-    };
-    let run = RunOptions {
-        language: Some("en".into()),
-        ..Default::default()
-    };
+    let (run, options) = crate::engine_options::options(spec.family)?;
     let mut stream = session
         .stream(&run, &options)
         .map_err(|_| "Could not start live recognition")?;

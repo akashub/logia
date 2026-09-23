@@ -10,6 +10,9 @@ mod final_delivery;
 mod inference_audio;
 mod messages;
 mod model_file;
+mod model_download;
+mod model_staging;
+mod engine_options;
 mod permissions;
 mod session;
 mod session_control;
@@ -44,9 +47,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .manage(model_file::DownloadState(
-            std::sync::atomic::AtomicBool::new(false),
-        ))
+        .manage(model_download::DownloadState::default())
         .manage(session::Sessions::default())
         .manage(dictionary::Dictionary::default())
         .setup(|app| {
@@ -59,9 +60,10 @@ fn main() {
             permissions::request_microphone,
             permissions::open_permission_settings,
             model_file::model_ready,
-            model_file::download_model,
+            model_download::download_model,
             model_file::list_models,
             model_file::remove_model,
+            model_file::select_model,
             session::start_recording,
             dictionary::set_dictionary,
             dictionary::preview_dictionary,

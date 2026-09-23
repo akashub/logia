@@ -272,6 +272,7 @@ footer {
 
 /* claude 2026-09-14: model catalogue rows. */
 .settings-models { display:flex; flex-direction:column; gap:14px; }
+.settings-models[hidden] { display:none; }
 .settings-model-row { border:1px solid var(--line); border-radius:12px; padding:18px 20px; background:var(--panel); }
 .settings-model-row[data-installed=yes] { border-color:color-mix(in srgb, var(--held) 45%, var(--line)); }
 .settings-model-head { display:flex; align-items:baseline; justify-content:space-between; gap:14px; }

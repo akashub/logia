@@ -20,15 +20,30 @@ exports.openFixture = async (browser, options = {}) => {
     // an entry that is listed but not yet pinned for download.
     if (command === 'list_models') return state.models ?? (state.models = [
       { id: 'moonshine-streaming-small', name: 'Moonshine Streaming Small', detail: 'Live captions while you speak.',
-        languages: 'English', bytes: 198506848, family: 'moonshine_streaming', installed: true, available: true, streams: true },
-      { id: 'parakeet-v3', name: 'Parakeet v3', detail: 'Stronger on names and technical words.',
-        languages: 'English and 24 European languages', bytes: 0, family: 'parakeet_stream', installed: false, available: false, streams: true }
+        languages: 'English', bytes: 198506848, family: 'moonshine_streaming', installed: true, active: true, available: true, streams: true },
+      { id: 'moonshine-streaming-medium', name: 'Moonshine Streaming Medium', detail: 'A larger English model with live captions.',
+        languages: 'English', bytes: 295793568, family: 'moonshine_streaming', installed: false, active: false, available: true, streams: true },
+      { id: 'parakeet-unified-en', name: 'Parakeet Unified EN', detail: 'English captions in buffered chunks.',
+        languages: 'English', bytes: 731357568, family: 'parakeet_buffered', installed: false, active: false, available: true, streams: true },
+      { id: 'parakeet-v3', name: 'Parakeet v3', detail: 'Batch transcription only in the current runtime.',
+        languages: 'English and 24 European languages', bytes: 0, family: 'offline', installed: false, active: false, available: false, streams: false }
     ]);
     if (command === 'remove_model') {
       const entry = (state.models || []).find(m => m.id === args.id);
       if (!entry) throw Error('Unknown model');
-      if (entry.id === 'moonshine-streaming-small') throw Error('The default model cannot be removed while it is the only one.');
+      if (entry.active) throw Error('Choose another installed model first.');
       entry.installed = false; return;
+    }
+    if (command === 'select_model') {
+      if (state.selectionError) throw Error('Model verification failed');
+      const entry = state.models.find(model => model.id === args.id);
+      if (!entry?.installed || !entry.available) throw Error('Download this model first');
+      state.models.forEach(model => { model.active = model.id === args.id; }); return;
+    }
+    if (command === 'download_model') {
+      if (state.delayDownload) await new Promise(resolve => { state.finishDownload = resolve; });
+      if (state.downloadError) throw Error('Download interrupted');
+      state.models.find(model => model.id === args.id).installed = true; return;
     }
     if (command === 'register_shortcut') {
       if (state.delayShortcut) await new Promise(resolve => { state.finishShortcut = resolve; });

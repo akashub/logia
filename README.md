@@ -28,7 +28,9 @@ Local development signing is separate from public distribution. To create a pers
 
 The preview supports passages up to 60 seconds, keeps no transcript history, and saves no recordings. Captions can revise until finalization; recognition errors can still occur. The model download uses a pinned revision and verified SHA-256. After download, recognition requires no network connection.
 
-The overlay keeps your words through pauses; it never shrinks or truncates mid-session. It shows about two lines by default and holds the whole transcript, which you can scroll back through or expand deliberately. An idle indicator can be enabled in Settings. Received words appear progressively within 140 ms; corrections update in place, and final text appears immediately. Reduced-motion preferences disable that pacing. Long passages follow the latest words until you scroll back. The meter reflects measured audio level, and sustained silence shows a warning. Vocabulary rules replace exact spoken phrases in final text. Opt-in history, hold-to-talk, and additional usable models remain planned.
+The overlay keeps your words through pauses; it never shrinks or truncates mid-session. It shows about two lines by default and holds the whole transcript, which you can scroll back through or expand deliberately. An idle indicator can be enabled in Settings. Received words appear progressively within 140 ms; corrections update in place, and final text appears immediately. Reduced-motion preferences disable that pacing. Long passages follow the latest words until you scroll back. The meter reflects measured audio level, and sustained silence shows a warning. Vocabulary rules replace exact spoken phrases in final text. Opt-in history and hold-to-talk remain planned.
+
+**Settings → Models** offers Moonshine Streaming Small (199 MB, default), Moonshine Streaming Medium (296 MB), and Parakeet Unified EN (731 MB). All three provide English live captions; Parakeet uses buffered chunks. Downloading does not change the active model: choose **Use model** to select an installed alternative. Selection persists across launches and drives both warmup and recording. Model changes are blocked while recognition runs, and the active model cannot be removed. Downloads have pinned revisions, exact sizes and SHA-256 checks; failed downloads leave the existing artifact and selection intact. Parakeet v3 remains unavailable because this runtime supports it only for batch transcription. Model import and comparative quality/language evaluation remain planned; a larger model is not a quality guarantee.
 
 Logia chooses the destination when the finished transcript is ready. Moving your cursor or switching apps while speaking changes where it will paste. All eligible apps use ordinary Command-V; an app does not need to support Accessibility text writes or belong to a supported-app list. The current process/window and any available field/selection metadata are checked immediately before dispatch. Known secure or nontext controls, secure-input mode, unavailable app/window identity and Logia's own window use clipboard recovery. Missing field metadata alone does not block paste. If an app hides whether it has a text cursor, Logia can post ordinary paste but cannot detect whether it was accepted; the transcript remains on the clipboard and in Recovery.
 
@@ -42,7 +44,7 @@ flowchart LR
     Parent -->|owned process + control pipe| Worker[Recognition worker]
     Mic[Microphone capture thread] -->|bounded mono audio queue| Worker
     Worker --> Resample[16 kHz conversion]
-    Resample --> Model[Local Moonshine streaming model]
+    Resample --> Model[Selected local streaming model]
     Model -->|partial / final events| Parent
     Parent --> Caption[Live captions and editable text]
     Parent -->|one final + clean worker exit| Check[Read current cursor destination]
@@ -125,7 +127,7 @@ cargo clippy --manifest-path spikes/recognition/Cargo.toml --locked --all-target
 ## Direction
 
 1. Maintain the working Mac global dictation preview with automatic build and regression checks.
-2. Wire actual model selection and verified alternatives; add microphone choice, hold-to-talk, longer sessions and model reuse.
+2. Evaluate the available models; add microphone choice, hold-to-talk, longer sessions and model reuse.
 3. Add bounded opt-in history and diagnostics, then validate Windows/Linux desktop integration and public distribution.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development and data-handling rules.

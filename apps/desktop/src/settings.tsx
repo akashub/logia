@@ -106,8 +106,6 @@ export function Settings(props: Props) {
         </Section>
         <Section title="Appearance"><Row title="Theme" detail="Choose the appearance of the settings window."><select aria-label="Theme" value={preferences.theme} onChange={event => onPreferences({ ...preferences, theme: event.target.value as Preferences['theme'] })}><option value="light">Light</option><option value="dark">Dark</option></select></Row></Section>
       </>}
-      {page === 'models' && <ModelsPage native={native} phase={phase} progress={props.progress}
-        busy={busy} onPrepare={props.onPrepare} onError={props.onError} />}
       {page === 'vocabulary' && <Vocabulary rules={props.rules} onRules={props.onRules} native={native} />}
       {page === 'advanced' && <>
         <Section title="Privacy">
@@ -121,9 +119,10 @@ export function Settings(props: Props) {
         </Section>
       </>}
       {(page === 'test' || page === 'recovery') && <div className="settings-tool-content">{props.children}</div>}
-      {props.error && <div className="settings-inline-error" role="alert">{props.error}</div>}
-
       </>}
+      <ModelsPage native={native} phase={phase} visible={!props.permissions.setup && page === 'models'}
+        busy={busy} onPrepare={props.onPrepare} onError={props.onError} />
+      {!props.permissions.setup && props.error && <div className="settings-inline-error" role="alert">{props.error}</div>}
     </main>
   </div>;
 }
