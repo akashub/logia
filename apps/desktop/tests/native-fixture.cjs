@@ -16,6 +16,18 @@ exports.openFixture = async (browser, options = {}) => {
     }
     if (command === 'plugin:event|emit') { await Promise.all(Object.keys(pages).map(label => emit(args.event, args.payload, label))); return; }
     if (command === 'model_ready') return true;
+    if (command === 'list_audio_inputs') {
+      const result = structuredClone(state.inputs ?? { devices: [{ id: 'built-in', name: 'Built-in microphone' }], selected: null, default_id: 'built-in', error: null });
+      if (state.delayInputs) await new Promise(resolve => { state.finishInputs = resolve; });
+      if (state.inputsError) throw Error('Could not list microphones');
+      return result;
+    }
+    if (command === 'select_audio_input') {
+      if (state.delayInputSelection) await new Promise(resolve => { state.finishInputSelection = resolve; });
+      if (state.inputSelectionError) throw Error('Microphone is unavailable. Choose another microphone in General.');
+      state.inputs.selected = args.id === null ? null : state.inputs.devices.find(device => device.id === args.id);
+      state.inputs.error = null; return structuredClone(state.inputs.selected);
+    }
     // claude 2026-09-14: the model catalogue. Mirrors the Rust shape, including
     // an entry that is listed but not yet pinned for download.
     if (command === 'list_models') return state.models ?? (state.models = [

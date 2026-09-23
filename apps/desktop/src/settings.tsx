@@ -1,6 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Vocabulary } from './vocabulary';
 import { ModelsPage } from './models-page';
+import { MicrophonePicker } from './microphone-picker';
+import { useAudioInputs } from './use-audio-inputs';
 import type { DictionaryRule } from './dictionary';
 import { Brand } from './brand';
 import { PermissionSetup } from './permission-setup';
@@ -56,6 +58,7 @@ export function Settings(props: Props) {
   const [applying, setApplying] = useState(false);
   useEffect(() => { setDraft(preferences.shortcut); }, [preferences.shortcut]);
   const busy = ['checking', 'downloading', 'warming', 'loading', 'recording', 'finishing', 'canceling'].includes(phase);
+  const inputs = useAudioInputs(native, page === 'general' && !props.permissions.setup, busy);
   const modelMissing = ['setup', 'checking', 'downloading'].includes(phase);
   const modelStatus = phase === 'setup' ? 'Not downloaded' : phase === 'checking' ? 'Checking…' : phase === 'downloading' ? 'Downloading…' : phase === 'warming' ? 'Preparing…' : 'Installed';
   function openTest() { onPage('test'); props.onTest(); }
@@ -91,6 +94,7 @@ export function Settings(props: Props) {
           {(modelMissing || phase === 'warming') && <button className="settings-button" onClick={() => onPage('models')}>{phase === 'setup' ? 'Set up model' : 'View model'}</button>}
         </div>}
         <Section title="Dictation">
+          <MicrophonePicker inputs={inputs} disabled={!native || busy} />
           <Row title="Global shortcut" detail="Press once to record in any app. Press again to stop.">
             <div className="settings-shortcut-picker"><select aria-label="Global shortcut" value={draft} disabled={!native || busy || applying} onChange={event => setDraft(event.target.value)}>
               {!presets.includes(draft) && <option value={draft}>{shortcutLabel(draft)}</option>}

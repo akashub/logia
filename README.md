@@ -22,6 +22,8 @@ Logia runs as a menu-bar utility on macOS. After model setup, launch prepares re
 
 On launch, the app prepares native recognition using generated silence before enabling Record. This preparation never opens a microphone. You can cancel it; the next recording can still initialize the recognizer normally. Device audio is collected into bounded chunks and, after conversion, fed to recognition in consistent 64 ms blocks regardless of microphone sample rate. Stop flushes the remaining audio rather than losing the last short callback.
 
+**Settings → General → Microphone** selects a connected input or follows **System default**. The choice persists across launches and applies to global dictation and Voice test. Each recording pins the exact device at its start; a missing selected device blocks recording instead of silently switching microphones. Device errors interrupt the session and retain partial text for recovery. Refreshing the device list and changing this setting never start capture. Microphone changes are disabled while recognition is running.
+
 For a standalone local app, run `pnpm app:install` in `apps/desktop`. It builds, signs, replaces `/Applications/Logia.app`, verifies the installed executable and signature, then opens it normally. The installer archives the previous app and development bundle outside Applications, leaving one installed app. Never copy a `.app` into an existing `.app`: that nests the new build inside the old bundle and invalidates its signature. `pnpm app` builds without installing. Native inference remains optimized in this debug preview.
 
 Local development signing is separate from public distribution. To create a persistent local signing identity, explicitly run `pnpm signing:setup` once. This imports a code-signing certificate and private key into your login keychain, permits `/usr/bin/codesign` to use that key, and does not change trust settings or privacy grants. Future `pnpm app` builds reuse it automatically; `LOCAL_SIGNING_IDENTITY` can select an existing identity instead. Without either identity the build uses ad-hoc signing and warns that macOS permissions may need granting again after an update. A fixed bundle identifier alone does not preserve an ad-hoc signature's identity. No Apple Developer ID or notarization is configured for public distribution.
@@ -61,6 +63,8 @@ Checks, from the repository root:
 cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --locked
 cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --locked --all-targets -- -D warnings
 ```
+
+`cargo run --manifest-path apps/desktop/src-tauri/Cargo.toml --locked --example input_smoke` checks the connected inputs' stable identities and exact resolution without opening audio streams. Actual device unplug/reconnect during recording remains a separate hardware acceptance check.
 
 For browser interaction checks, run `pnpm dev` in `apps/desktop`, then `pnpm exec playwright install chromium` and `pnpm test:ui` in another terminal there. Run `pnpm test:transcript` with Node.js 24+ for deterministic presentation checks. These test the UI contract; they do not test recognition quality. A developer can separately run the native executable with `--recognizer MODEL.gguf TEST.wav` on a non-sensitive 16-bit PCM WAV, up to 60 seconds. That explicit test mode writes recognition events to stdout; it never opens a microphone.
 
@@ -127,7 +131,7 @@ cargo clippy --manifest-path spikes/recognition/Cargo.toml --locked --all-target
 ## Direction
 
 1. Maintain the working Mac global dictation preview with automatic build and regression checks.
-2. Evaluate the available models; add microphone choice, hold-to-talk, longer sessions and model reuse.
+2. Evaluate the available models; add hold-to-talk, longer sessions and model reuse.
 3. Add bounded opt-in history and diagnostics, then validate Windows/Linux desktop integration and public distribution.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development and data-handling rules.

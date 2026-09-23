@@ -1,4 +1,4 @@
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::traits::{DeviceTrait, StreamTrait};
 use cpal::{FromSample, Sample, SizedSample};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -22,12 +22,13 @@ impl Capture {
         let stopping = stop.clone();
         let errors = failed.clone();
         std::thread::spawn(move || {
-            let opened = open(sender, errors, stopping.clone());
+            let opened = open(sender, errors.clone(), stopping.clone());
             match opened {
                 Ok((stream, rate)) => {
                     let _ = ready.send(Ok(rate));
                     let start = Instant::now();
                     while !stopping.load(Ordering::Acquire)
+                        && !errors.load(Ordering::Acquire)
                         && start.elapsed().as_secs() < crate::messages::MAX_SECONDS
                     {
                         std::thread::sleep(Duration::from_millis(5));
@@ -63,14 +64,12 @@ fn open(
     failed: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
 ) -> Result<(cpal::Stream, u32), String> {
-    let host = cpal::default_host();
-    let device = host
-        .default_input_device()
-        .ok_or("No microphone found. Connect one and try again.")?;
+    let id = crate::input_devices::worker_input()?;
+    let device = crate::input_devices::capture_device(id.as_deref())?;
     let supported = device
         .default_input_config()
         .map_err(|_| "Microphone is unavailable")?;
-    let config: cpal::StreamConfig = supported.clone().into();
+    let config: cpal::StreamConfig = supported.into();
     if config.channels == 0 {
         return Err("Microphone has no input channels".into());
     }
@@ -84,6 +83,12 @@ fn open(
         cpal::SampleFormat::U16 => {
             build::<u16>(&device, &config, sender, failed.clone(), stop.clone())
         }
+        cpal::SampleFormat::I32 => {
+            build::<i32>(&device, &config, sender, failed.clone(), stop.clone())
+        }
+        cpal::SampleFormat::I24 => {
+            build::<cpal::I24>(&device, &config, sender, failed.clone(), stop.clone())
+        }
         _ => return Err("This microphone format is not supported in the preview".into()),
     }
     .map_err(|_| {
@@ -94,7 +99,7 @@ fn open(
             .play()
             .map_err(|_| "Could not start the microphone")?;
     }
-    Ok((stream, config.sample_rate.0))
+    Ok((stream, config.sample_rate))
 }
 
 fn build<T: SizedSample + Sample>(
@@ -103,7 +108,7 @@ fn build<T: SizedSample + Sample>(
     sender: SyncSender<Vec<f32>>,
     failed: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
-) -> Result<cpal::Stream, cpal::BuildStreamError>
+) -> Result<cpal::Stream, cpal::Error>
 where
     f32: FromSample<T>,
 {
@@ -111,7 +116,7 @@ where
     let errors = failed.clone();
     let mut audio = crate::capture_audio::CaptureAudio::new(sender, failed);
     device.build_input_stream(
-        config,
+        *config,
         move |input: &[T], _| {
             audio.push(input, channels, &stop);
         },

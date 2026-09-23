@@ -65,6 +65,8 @@
 .settings-button:disabled,.settings-shell select:disabled { opacity:.45; cursor:default; }
 .settings-button-primary { background:var(--ink); color:var(--paper); border-color:var(--ink); padding:10px 17px; min-height:40px; }
 .settings-shortcut-picker { display:flex; gap:7px; }
+.settings-microphone .settings-row-control { width:230px; flex-shrink:1; min-width:150px; }
+.settings-microphone select { width:100%; text-overflow:ellipsis; }
 .settings-shortcut-picker select { width:170px; font-size:10px; }
 .settings-shortcut-status { font-size:10px; color:var(--settings-muted); margin:10px 0; }
 .settings-shortcut-status kbd { font:inherit; color:var(--ink); }

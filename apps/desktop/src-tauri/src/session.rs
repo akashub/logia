@@ -1,5 +1,4 @@
 pub use crate::session_control::terminate;
-use tauri::Manager;
 use crate::{messages::WorkerEvent, model_file};
 use serde::Serialize;
 use std::{
@@ -7,6 +6,7 @@ use std::{
     process::{Child, Command, Stdio},
     sync::{Arc, Mutex},
 };
+use tauri::Manager;
 
 #[derive(Default)]
 pub(super) struct Inner {
@@ -39,7 +39,7 @@ impl Sessions {
         let state = self.0.lock().map_err(|_| "Session state unavailable")?;
         if state.child.is_some() {
             return Err(
-                "Wait for recognition to stop, or choose Cancel, before dismissing Logia.".into(),
+                "Wait for recognition to stop, or choose Cancel, before changing settings or dismissing Logia.".into(),
             );
         }
         action()
@@ -86,7 +86,11 @@ fn launch(
     // Same lock order as model mutations: session lock, then mutation gate.
     // The worker slot is occupied before releasing this lock, so a file change
     // can neither race the selected path lookup nor the child startup.
-    if app.state::<crate::model_download::DownloadState>().0.load(std::sync::atomic::Ordering::Acquire) {
+    if app
+        .state::<crate::model_download::DownloadState>()
+        .0
+        .load(std::sync::atomic::Ordering::Acquire)
+    {
         return Err("Wait for the model download or change to finish".into());
     }
     let path = model_file::path(&app)?;
@@ -94,7 +98,19 @@ fn launch(
         return Err("Download your selected model first".into());
     }
     let executable = std::env::current_exe().map_err(|_| "Could not locate the recognizer")?;
-    let mut child = Command::new(executable)
+    let input = if mode == "--recognizer" {
+        Some(crate::input_devices::snapshot(
+            &crate::input_settings::folder(&app)?,
+        )?)
+    } else {
+        None
+    };
+    let mut command = Command::new(executable);
+    command.env_remove(crate::input_devices::WORKER_INPUT);
+    if let Some(input) = input {
+        command.env(crate::input_devices::WORKER_INPUT, input);
+    }
+    let mut child = command
         .arg(mode)
         .arg(path)
         .stdin(Stdio::piped())

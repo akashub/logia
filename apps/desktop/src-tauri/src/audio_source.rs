@@ -59,16 +59,9 @@ impl AudioSource {
     }
     pub fn next(&mut self) -> Result<Option<Vec<f32>>, String> {
         match self {
-            Self::Microphone(mic) => {
-                if mic.failed.load(Ordering::Acquire) {
-                    return Err("Microphone disconnected or audio processing fell behind. Your partial text is available.".into());
-                }
-                match mic.receiver.recv_timeout(Duration::from_millis(50)) {
-                    Ok(chunk) => Ok(Some(chunk)),
-                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Ok(Some(Vec::new())),
-                    Err(_) => Ok(None),
-                }
-            }
+            Self::Microphone(mic) => receive(&mic.failed, || {
+                mic.receiver.recv_timeout(Duration::from_millis(50))
+            }),
             Self::File { chunks, .. } => Ok(chunks.next()),
         }
     }
@@ -76,5 +69,57 @@ impl AudioSource {
         if let Self::Microphone(mic) = self {
             mic.stop();
         }
+    }
+}
+
+fn receive(
+    failed: &AtomicBool,
+    wait: impl FnOnce() -> Result<Vec<f32>, std::sync::mpsc::RecvTimeoutError>,
+) -> Result<Option<Vec<f32>>, String> {
+    const FAILURE: &str =
+        "Microphone disconnected or audio processing fell behind. Your partial text is available.";
+    if failed.load(Ordering::Acquire) {
+        return Err(FAILURE.into());
+    }
+    let received = wait();
+    // A callback can fail while receive is blocked, then close the channel as
+    // capture shuts down. That is an interrupted session, never clean EOF.
+    if failed.load(Ordering::Acquire) {
+        return Err(FAILURE.into());
+    }
+    match received {
+        Ok(chunk) => Ok(Some(chunk)),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Ok(Some(Vec::new())),
+        Err(_) => Ok(None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc::RecvTimeoutError::{Disconnected, Timeout};
+
+    #[test]
+    fn failed_capture_cannot_return_clean_eof_or_audio_after_waiting() {
+        for result in [Err(Disconnected), Err(Timeout), Ok(vec![0.1])] {
+            let failed = AtomicBool::new(false);
+            assert!(receive(&failed, || {
+                failed.store(true, Ordering::Release); // Callback fails while receive is blocked.
+                result
+            })
+            .is_err());
+        }
+        assert!(receive(&AtomicBool::new(true), || panic!("must not wait")).is_err());
+    }
+
+    #[test]
+    fn healthy_capture_distinguishes_audio_timeout_and_clean_stop() {
+        let healthy = AtomicBool::new(false);
+        assert_eq!(
+            receive(&healthy, || Ok(vec![0.1])).unwrap(),
+            Some(vec![0.1])
+        );
+        assert_eq!(receive(&healthy, || Err(Timeout)).unwrap(), Some(vec![]));
+        assert_eq!(receive(&healthy, || Err(Disconnected)).unwrap(), None);
     }
 }

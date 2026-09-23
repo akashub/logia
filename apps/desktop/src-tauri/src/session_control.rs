@@ -199,12 +199,25 @@ mod tests {
             delivered: None,
         })));
         let started = Instant::now();
+        let mut settings_changed = false;
         assert!(
-            sessions.when_idle(|| Ok(())).is_err(),
-            "active recognition cannot be hidden"
+            sessions
+                .when_idle(|| {
+                    settings_changed = true;
+                    Ok(())
+                })
+                .is_err(),
+            "active recognition cannot mutate settings or be hidden"
         );
+        assert!(!settings_changed);
         assert_eq!(terminate(&sessions).unwrap(), 8);
-        assert!(sessions.when_idle(|| Ok(())).is_ok());
+        assert!(sessions
+            .when_idle(|| {
+                settings_changed = true;
+                Ok(())
+            })
+            .is_ok());
+        assert!(settings_changed);
         assert!(started.elapsed() < Duration::from_secs(2));
         assert!(child.lock().unwrap().try_wait().unwrap().is_some());
         let state = sessions.0.lock().unwrap();

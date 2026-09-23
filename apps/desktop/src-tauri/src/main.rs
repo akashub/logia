@@ -8,6 +8,9 @@ mod desktop_window;
 mod dictionary;
 mod final_delivery;
 mod inference_audio;
+mod input_selection;
+mod input_devices;
+mod input_settings;
 mod messages;
 mod model_file;
 mod model_download;
@@ -59,6 +62,8 @@ fn main() {
             permissions::microphone_status,
             permissions::request_microphone,
             permissions::open_permission_settings,
+            input_settings::list_audio_inputs,
+            input_settings::select_audio_input,
             model_file::model_ready,
             model_download::download_model,
             model_file::list_models,
