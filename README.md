@@ -16,7 +16,7 @@ pnpm tauri dev
 
 Complete the two permission steps in Settings and download the English model once (199 MB). Each permission step shows one action appropriate to its current state; returning from System Settings refreshes the status automatically. **Voice test** is a separate diagnostic tool, not the main dictation workflow.
 
-Once ready, your global shortcut starts dictation in a compact overlay while you work in another app. Press it again while listening to stop. The default is **Control–Option–Space**; **Settings → General → Global shortcut** offers Control–Option–Space, Control–Shift–Space and Option–Shift–Space, and a binding that fails to register is never saved. The overlay is a separate non-activating panel with no title bar or controls of its own: it floats above ordinary windows, never takes keyboard focus from the field you are dictating into, and stays out of window cycling. **Overlay position** places it at the bottom or top of the screen. A shortcut conflict shows a retry control; the deliberate voice test in Settings remains usable. Hold-to-talk is later work.
+Once ready, your global shortcut starts dictation in a compact overlay while you work in another app. Press it again while listening to stop. The default is **Control–Option–Space**; **Settings → General → Global shortcut** offers Control–Option–Space, Control–Shift–Space and Option–Shift–Space, and a binding that fails to register is never saved. **Shortcut behavior → Hold to talk** lets you hold the shortcut while speaking and release to finish; press-to-toggle remains the default. Releasing during startup cancels that pending start, and Stop and Cancel remain available in the overlay. The overlay is a separate non-activating panel with no title bar: it floats above ordinary windows, never takes keyboard focus from the field you are dictating into, and stays out of window cycling. **Overlay position** places it at the bottom or top of the screen. A shortcut conflict shows a retry control; the deliberate voice test in Settings remains usable.
 
 Logia runs as a menu-bar utility on macOS. After model setup, launch prepares recognition in the background; use the shortcut to dictate or the menu-bar icon → **Open Logia** for setup and text recovery. Closing an idle window hides it and retains its in-memory text. **Quit Logia** exits and stops its worker. Start from the desired text field with the global shortcut and use the shortcut again to stop. A new global session checks Microphone and Accessibility access first; revoked access returns to the relevant setup step. Stop remains available even if permission changes during a recording. The deliberate Voice test stays copy-only.
 
@@ -30,7 +30,7 @@ Local development signing is separate from public distribution. To create a pers
 
 The preview supports passages up to 60 seconds, keeps no transcript history, and saves no recordings. Captions can revise until finalization; recognition errors can still occur. The model download uses a pinned revision and verified SHA-256. After download, recognition requires no network connection.
 
-The overlay keeps your words through pauses; it never shrinks or truncates mid-session. It shows about two lines by default and holds the whole transcript, which you can scroll back through or expand deliberately. An idle indicator can be enabled in Settings. Received words appear progressively within 140 ms; corrections update in place, and final text appears immediately. Reduced-motion preferences disable that pacing. Long passages follow the latest words until you scroll back. The meter reflects measured audio level, and sustained silence shows a warning. Vocabulary rules replace exact spoken phrases in final text. Opt-in history and hold-to-talk remain planned.
+The overlay keeps your words through pauses; it never shrinks or truncates mid-session. It shows about two lines by default and holds the whole transcript, which you can scroll back through or expand deliberately. An idle indicator can be enabled in Settings. Received words appear progressively within 140 ms; corrections update in place, and final text appears immediately. Reduced-motion preferences disable that pacing. Long passages follow the latest words until you scroll back. The meter reflects measured audio level, and sustained silence shows a warning. Vocabulary rules replace exact spoken phrases in final text. Opt-in history remains planned.
 
 **Settings → Models** offers Moonshine Streaming Small (199 MB, default), Moonshine Streaming Medium (296 MB), and Parakeet Unified EN (731 MB). All three provide English live captions; Parakeet uses buffered chunks. Downloading does not change the active model: choose **Use model** to select an installed alternative. Selection persists across launches and drives both warmup and recording. Model changes are blocked while recognition runs, and the active model cannot be removed. Downloads have pinned revisions, exact sizes and SHA-256 checks; failed downloads leave the existing artifact and selection intact. Parakeet v3 remains unavailable because this runtime supports it only for batch transcription. Model import and comparative quality/language evaluation remain planned; a larger model is not a quality guarantee.
 
@@ -65,6 +65,8 @@ cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --locked --all-ta
 ```
 
 `cargo run --manifest-path apps/desktop/src-tauri/Cargo.toml --locked --example input_smoke` checks the connected inputs' stable identities and exact resolution without opening audio streams. Actual device unplug/reconnect during recording remains a separate hardware acceptance check.
+
+On macOS, quit the installed Logia app and run `bash scripts/test-shortcut.sh` to check native shortcut presses, releases, repeat suppression and hold ownership. It needs Accessibility access, opens its own blank window, refuses to run alongside installed Logia, and contains no microphone code. `--build-only` compiles the fixture without posting keys.
 
 For browser interaction checks, run `pnpm dev` in `apps/desktop`, then `pnpm exec playwright install chromium` and `pnpm test:ui` in another terminal there. Run `pnpm test:transcript` with Node.js 24+ for deterministic presentation checks. These test the UI contract; they do not test recognition quality. A developer can separately run the native executable with `--recognizer MODEL.gguf TEST.wav` on a non-sensitive 16-bit PCM WAV, up to 60 seconds. That explicit test mode writes recognition events to stdout; it never opens a microphone.
 
@@ -131,7 +133,7 @@ cargo clippy --manifest-path spikes/recognition/Cargo.toml --locked --all-target
 ## Direction
 
 1. Maintain the working Mac global dictation preview with automatic build and regression checks.
-2. Evaluate the available models; add hold-to-talk, longer sessions and model reuse.
+2. Evaluate the available models; add longer sessions and model reuse.
 3. Add bounded opt-in history and diagnostics, then validate Windows/Linux desktop integration and public distribution.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development and data-handling rules.

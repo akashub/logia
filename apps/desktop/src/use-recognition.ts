@@ -25,8 +25,8 @@ export function useRecognition(options: Options) {
         // authoritative outcome. A preceding Stopped event cannot open a gap.
         if (phase.current === 'canceling') return;
         const event = payload.event;
-        if (event.type === 'loading' && phase.current !== 'warming') transition('loading');
-        if (event.type === 'listening') { transition('recording'); seconds(0); level(0); }
+        if (event.type === 'loading' && phase.current !== 'warming' && phase.current !== 'finishing') transition('loading');
+        if (event.type === 'listening' && phase.current !== 'finishing') { transition('recording'); seconds(0); level(0); }
         // claude 2026-09-11: a measured peak. Zero for the whole session means the
         // device is handing us silence, which is what a denied microphone does.
         if (event.type === 'level' && typeof event.peak === 'number') level(event.peak);

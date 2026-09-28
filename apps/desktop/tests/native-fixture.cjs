@@ -5,7 +5,10 @@ exports.openFixture = async (browser, options = {}) => {
   const pages = {};
   const state = { generation: 0, starts: 0, warmups: 0, captures: 0, discarded: [], calls: [], conflict: false, overlayVisible: false, hidden: true };
   state.microphone = options.microphone ?? 'authorized'; state.accessibility = options.accessibility ?? true;
-  const emit = async (name, payload, target = 'main') => pages[target]?.evaluate(({ name, payload }) => window.emitTest(name, payload), { name, payload });
+  const emit = async (name, payload, target = 'main') => {
+    if (name === 'dictation-shortcut' && !payload) payload = { id: `fixture-${state.gesture = (state.gesture ?? 0) + 1}`, phase: 'pressed', mode: state.shortcutMode ?? 'toggle' };
+    return pages[target]?.evaluate(({ name, payload }) => window.emitTest(name, payload), { name, payload });
+  };
   const recognition = event => emit('recognition', { generation: state.generation, event });
   await context.exposeBinding('nativeCommand', async ({ page }, command, args = {}) => {
     state.calls.push(command);
@@ -59,7 +62,8 @@ exports.openFixture = async (browser, options = {}) => {
     }
     if (command === 'register_shortcut') {
       if (state.delayShortcut) await new Promise(resolve => { state.finishShortcut = resolve; });
-      if (state.conflict) throw Error('Shortcut is already in use.'); return '⌃ ⌥ Space';
+      if (state.conflict) throw Error('Shortcut is already in use.');
+      state.shortcutMode = args.mode ?? 'toggle'; return '⌃ ⌥ Space';
     }
     if (command === 'warmup_recognizer') { state.warmups++; return state.generation; }
     if (command === 'show_main_window') { state.hidden = false; return; }
@@ -75,7 +79,10 @@ exports.openFixture = async (browser, options = {}) => {
       if (state.delayWindow) await new Promise(resolve => { state.finishWindow = resolve; });
       state.overlayVisible = true; return;
     }
-    if (command === 'capture_target') return { token: String(++state.captures), status: 'armed' };
+    if (command === 'capture_target') {
+      if (state.delayCapture) await new Promise(resolve => { state.finishCapture = resolve; });
+      return { token: String(++state.captures), status: 'armed' };
+    }
     if (command === 'discard_target') { state.discarded.push(args.token); return; }
     if (command === 'accessibility_permission') {
       if (args.prompt) state.typingRequests = (state.typingRequests || 0) + 1;
@@ -98,13 +105,15 @@ exports.openFixture = async (browser, options = {}) => {
     if (command === 'overlay_editing_token') return 1;
     if (command === 'set_overlay_editing') { state.editing = args.editing; return; }
     if (command === 'start_recording') {
+      if (state.delayStart) await new Promise(resolve => { state.finishStart = resolve; });
       state.panelAtStart = await pages.overlay.evaluate(() => {
         const card = document.querySelector('.overlay-card');
         return card && { phase: card.dataset.phase, rung: card.dataset.rung };
       });
       state.visibleAtStart = state.overlayVisible;
       state.starts++; state.target = args.target; state.generation++;
-      setTimeout(() => void recognition({ type: 'listening' }), 25); return state.generation;
+      if (!state.suppressListening) setTimeout(() => void recognition({ type: 'listening' }), 25);
+      return state.generation;
     }
     if (command === 'stop_recording') { state.stops = (state.stops || 0) + 1; return; }
     if (command === 'cancel_recording') {

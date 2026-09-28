@@ -15,5 +15,6 @@ export type OverlaySnapshot = {
   /** Recording for several seconds with nothing but digital silence. */
   deaf: boolean;
   shortcut: string; position: 'top' | 'bottom'; showIdle: boolean;
+  shortcutMode: 'toggle' | 'hold';
 };
 export const activePhase = (phase: Phase) => ['loading', 'recording', 'finishing', 'canceling'].includes(phase);

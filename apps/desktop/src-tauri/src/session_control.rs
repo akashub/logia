@@ -21,6 +21,8 @@ fn invalidate(sessions: &Sessions) -> Result<Canceled, String> {
 }
 
 fn invalidate_locked(state: &mut crate::session::Inner) -> Canceled {
+    crate::shortcut_gesture::GESTURES.invalidate();
+    state.hold = None;
     state.generation += 1;
     let canceled = Canceled {
         generation: state.generation,
@@ -187,14 +189,27 @@ mod tests {
         terminate(&sessions).unwrap();
     }
     #[test]
+    fn cancel_clears_hold_ownership_before_late_release_can_finish_child() {
+        let child = Arc::new(Mutex::new(Command::new("/bin/cat")
+            .stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).spawn().unwrap()));
+        let sessions = Sessions(Arc::new(Mutex::new(Inner { hold: Some(41), child: Some(child.clone()), ..Inner::default() })));
+        let canceled = invalidate(&sessions).unwrap();
+        sessions.finish_hold(41).unwrap();
+        assert!(!sessions.0.lock().unwrap().finishing);
+        reap(&sessions, canceled).unwrap();
+        assert!(child.lock().unwrap().try_wait().unwrap().is_some());
+    }
+    #[test]
     fn cancel_reaps_real_owned_process_before_allowing_replacement() {
         let child = Arc::new(Mutex::new(
             Command::new("/bin/sleep").arg("60").spawn().unwrap(),
         ));
         let sessions = Sessions(Arc::new(Mutex::new(Inner {
             generation: 7,
+            shortcut_configuration: Default::default(),
             child: Some(child.clone()),
             finishing: true,
+            hold: None,
             target: 0,
             delivered: None,
         })));

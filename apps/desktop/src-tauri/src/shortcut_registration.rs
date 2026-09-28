@@ -1,8 +1,8 @@
-use crate::shortcut_edge::ShortcutEdge;
-use std::sync::{
-    atomic::{AtomicU8, Ordering},
-    Arc,
+use crate::{
+    shortcut_edge::ShortcutEdge,
+    shortcut_gesture::{GestureEvent, Gestures, Mode},
 };
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum Preset {
@@ -39,14 +39,14 @@ impl Preset {
 }
 pub(super) struct Binding {
     edge: ShortcutEdge,
-    active: Arc<AtomicU8>,
+    gestures: Arc<Gestures>,
     preset: Preset,
 }
 impl Binding {
-    pub(super) fn accept(&self, pressed: bool) -> bool {
-        // Track releases even while inactive, so switching cannot turn a held
-        // key's auto-repeat into a fresh Record/Stop gesture.
-        self.edge.accept(pressed) && self.active.load(Ordering::SeqCst) == self.preset as u8
+    pub(super) fn accept(&self, pressed: bool) -> Option<GestureEvent> {
+        // Track both edges while inactive or suspended, so a held key's
+        // auto-repeat cannot become a fresh gesture after configuration.
+        self.gestures.edge(self.preset as u8, &self.edge, pressed)
     }
 }
 pub(super) trait Registrar {
@@ -57,26 +57,40 @@ pub(super) trait Registrar {
 pub(super) struct Selection {
     current: Option<Preset>,
     pending_cleanup: Option<Preset>,
-    active: Arc<AtomicU8>,
+    gestures: Arc<Gestures>,
 }
 impl Selection {
+    pub(super) fn new(gestures: Arc<Gestures>) -> Self {
+        Self {
+            gestures,
+            ..Self::default()
+        }
+    }
+    fn unregister(&self, preset: Preset, registrar: &mut impl Registrar) -> Result<(), ()> {
+        registrar.unregister(preset)?;
+        self.gestures.forget(preset as u8);
+        Ok(())
+    }
     pub(super) fn select(
         &mut self,
         next: Preset,
+        mode: Mode,
         registrar: &mut impl Registrar,
     ) -> Result<(), &'static str> {
+        let configuration = self.gestures.configure()?;
         if let Some(pending) = self.pending_cleanup.filter(|pending| *pending != next) {
-            registrar.unregister(pending).map_err(|_| "Could not clean up the previous shortcut change. Your existing shortcut is still active. Retry, or quit and reopen Logia.")?;
+            self.unregister(pending, registrar).map_err(|_| "Could not clean up the previous shortcut change. Your existing shortcut is still active. Retry, or quit and reopen Logia.")?;
             self.pending_cleanup = None;
         }
         if self.current == Some(next) {
+            configuration.commit(next as u8, mode);
             return Ok(());
         }
-        registrar.register(next, Binding { edge: ShortcutEdge::default(), active: self.active.clone(), preset: next })
+        registrar.register(next, Binding { edge: ShortcutEdge::default(), gestures: self.gestures.clone(), preset: next })
             .map_err(|_| "Could not register the shortcut. It may be in use by another app. Your existing shortcut has not changed.")?;
         if let Some(previous) = self.current {
-            if registrar.unregister(previous).is_err() {
-                if registrar.unregister(next).is_err() {
+            if self.unregister(previous, registrar).is_err() {
+                if self.unregister(next, registrar).is_err() {
                     self.pending_cleanup = Some(next);
                     return Err("Could not finish the shortcut change. Your existing shortcut is still active. Retry, or quit and reopen Logia to release the unused shortcut.");
                 }
@@ -86,7 +100,7 @@ impl Selection {
         }
         self.current = Some(next);
         self.pending_cleanup = None;
-        self.active.store(next as u8, Ordering::SeqCst);
+        configuration.commit(next as u8, mode);
         Ok(())
     }
 }

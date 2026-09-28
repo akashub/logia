@@ -75,8 +75,8 @@ fn check(app: &tauri::AppHandle, fixture_path: &str, pointer_path: &str) -> Resu
         if ready.trim() != "ready" { return Err("Fixture not ready".into()); }
         // claude 2026-09-10: register_shortcut now takes the chosen preset;
         // None keeps the user's default. Called twice to assert idempotence.
-        shortcut::register_shortcut(app.clone(), None)?;
-        shortcut::register_shortcut(app.clone(), None)?;
+        shortcut::register_shortcut(app.clone(), None, None)?;
+        shortcut::register_shortcut(app.clone(), None, None)?;
         let original = snapshot(app)?;
         if original.0 != fixture.id() as i32 { return Err("Fixture not foreground".into()); }
         let (tx, rx) = std::sync::mpsc::channel();

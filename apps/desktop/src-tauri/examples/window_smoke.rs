@@ -9,12 +9,20 @@ mod native;
 #[path = "../src/shortcut_edge.rs"]
 mod shortcut_edge;
 
+#[cfg(target_os = "macos")]
+#[allow(dead_code)]
+#[path = "../src/shortcut_gesture.rs"]
+mod shortcut_gesture;
+
 // This fixture deliberately has no recording implementation or microphone API.
 #[cfg(target_os = "macos")]
 mod session {
     #[derive(Default)]
     pub struct Sessions(pub std::sync::atomic::AtomicBool);
+    pub struct ShortcutConfiguration;
     impl Sessions {
+        pub fn reserve_shortcut(&self) -> Result<ShortcutConfiguration, String> { self.when_idle(|| Ok(ShortcutConfiguration)) }
+        pub fn finish_hold(&self, _id: u64) -> Result<(), String> { Ok(()) }
         pub fn when_idle<T>(&self, action: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
             if self.0.load(std::sync::atomic::Ordering::SeqCst) {
                 return Err("Fixture has an active session".into());

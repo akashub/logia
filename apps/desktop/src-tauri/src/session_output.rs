@@ -95,6 +95,8 @@ pub fn read(
             } });
         }
         if exit.is_some() {
+            crate::shortcut_gesture::GESTURES.invalidate();
+            state.hold = None;
             state.child = None;
             state.finishing = false;
             let _ = main_app.emit("recognition", Update { generation, event: WorkerEvent::Stopped });

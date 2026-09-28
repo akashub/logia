@@ -14,7 +14,7 @@ export type SettingsPage = 'general' | 'models' | 'vocabulary' | 'advanced' | 't
 type Props = {
   phase: string; shortcut: string; shortcutError: string; retryable: boolean;
   error: string; progress: number; native: boolean; preferences: Preferences;
-  onPreferences: (next: Preferences) => void; onShortcut: (shortcut: string) => Promise<void>;
+  onPreferences: (next: Preferences) => void; onShortcut: (shortcut: string, mode: Preferences['shortcutMode']) => Promise<void>;
   onRetryShortcut: () => void; onDownload: () => void; onError: (message: string) => void;
   onPrepare: () => void; onTest: () => void; page: SettingsPage;
   onPage: (page: SettingsPage) => void; children?: ReactNode;
@@ -64,7 +64,7 @@ export function Settings(props: Props) {
   function openTest() { onPage('test'); props.onTest(); }
   async function applyShortcut() {
     setApplying(true);
-    try { await props.onShortcut(draft); } catch { /* The controller exposes the registration error. */ }
+    try { await props.onShortcut(draft, preferences.shortcutMode); } catch { /* The controller exposes the registration error. */ }
     finally { setApplying(false); }
   }
   return <div className="settings-shell">
@@ -95,7 +95,15 @@ export function Settings(props: Props) {
         </div>}
         <Section title="Dictation">
           <MicrophonePicker inputs={inputs} disabled={!native || busy} />
-          <Row title="Global shortcut" detail="Press once to record in any app. Press again to stop.">
+          <Row title="Shortcut behavior" detail={preferences.shortcutMode === 'hold' ? 'Keep the shortcut held while speaking. Release to finish.' : 'Press once to record. Press again to finish.'}>
+            <select aria-label="Shortcut behavior" value={preferences.shortcutMode} disabled={!native || busy || applying}
+              onChange={event => {
+                setApplying(true);
+                void props.onShortcut(preferences.shortcut, event.target.value as Preferences['shortcutMode'])
+                  .catch(() => {}).finally(() => setApplying(false));
+              }}><option value="toggle">Press to toggle</option><option value="hold">Hold to talk</option></select>
+          </Row>
+          <Row title="Global shortcut" detail="Dictate from the app where you are working.">
             <div className="settings-shortcut-picker"><select aria-label="Global shortcut" value={draft} disabled={!native || busy || applying} onChange={event => setDraft(event.target.value)}>
               {!presets.includes(draft) && <option value={draft}>{shortcutLabel(draft)}</option>}
               {presets.map(value => <option key={value} value={value}>{shortcutLabel(value)}</option>)}

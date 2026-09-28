@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readPreferences, savePreferences } from '../src/preferences.ts';
 
-const defaults = { position: 'bottom', showIdle: false, theme: 'light', shortcut: 'Control+Alt+Space' };
+const defaults = { position: 'bottom', showIdle: false, theme: 'light', shortcut: 'Control+Alt+Space', shortcutMode: 'toggle' };
 function storage(value: string | null = null) {
   return { getItem: (_key: string) => value, setItem: (_key: string, next: string) => { value = next; } };
 }
@@ -16,7 +16,7 @@ test('missing and damaged preferences recover without blocking startup', () => {
 
 test('valid custom preferences survive saving and reopening', () => {
   const disk = storage();
-  const selected = { position: 'top' as const, showIdle: false, theme: 'dark' as const, shortcut: 'Alt+Shift+Space' };
+  const selected = { position: 'top' as const, showIdle: false, theme: 'dark' as const, shortcut: 'Alt+Shift+Space', shortcutMode: 'hold' as const };
   savePreferences(selected, disk);
   assert.deepEqual(readPreferences(disk), selected);
 });
@@ -31,6 +31,9 @@ test('invalid fields are discarded independently while valid choices survive', (
 });
 
 test('saved shortcuts must match a native-supported preset before startup registration', () => {
+  for (const shortcutMode of [null, 'invalid', false]) {
+    assert.equal(readPreferences(storage(JSON.stringify({ shortcutMode }))).shortcutMode, 'toggle');
+  }
   for (const shortcut of ['Control+A', 'CommandOrControl+Shift+Space', 'Control+Control+Space']) {
     assert.deepEqual(readPreferences(storage(JSON.stringify({ theme: 'dark', shortcut }))), {
       ...defaults, theme: 'dark',

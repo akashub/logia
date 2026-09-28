@@ -2,7 +2,6 @@ pub use crate::session_control::terminate;
 use crate::{messages::WorkerEvent, model_file};
 use serde::Serialize;
 use std::{
-    io::Write,
     process::{Child, Command, Stdio},
     sync::{Arc, Mutex},
 };
@@ -11,8 +10,10 @@ use tauri::Manager;
 #[derive(Default)]
 pub(super) struct Inner {
     pub(super) generation: u64,
+    pub(super) shortcut_configuration: Arc<std::sync::atomic::AtomicBool>,
     pub(super) child: Option<Arc<Mutex<Child>>>,
     pub(super) finishing: bool,
+    pub(super) hold: Option<u64>,
     pub(super) target: u64,
     pub(super) delivered: Option<DeliveryOutcome>,
 }
@@ -37,11 +38,7 @@ impl Sessions {
     }
     pub fn when_idle<T>(&self, action: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
         let state = self.0.lock().map_err(|_| "Session state unavailable")?;
-        if state.child.is_some() {
-            return Err(
-                "Wait for recognition to stop, or choose Cancel, before changing settings or dismissing Logia.".into(),
-            );
-        }
+        state.require_idle()?;
         action()
     }
 }
@@ -54,11 +51,11 @@ pub(super) struct Update {
 #[tauri::command]
 pub fn start_recording(
     target: Option<String>,
+    gesture: Option<String>,
     app: tauri::AppHandle,
     sessions: tauri::State<'_, Sessions>,
 ) -> Result<u64, String> {
-    crate::permissions::require_microphone()?;
-    launch(app, sessions, "--recognizer", target)
+    launch(app, sessions, "--recognizer", target, gesture)
 }
 
 #[tauri::command]
@@ -66,7 +63,7 @@ pub fn warmup_recognizer(
     app: tauri::AppHandle,
     sessions: tauri::State<'_, Sessions>,
 ) -> Result<u64, String> {
-    launch(app, sessions, "--warmup", None)
+    launch(app, sessions, "--warmup", None, None)
 }
 
 fn launch(
@@ -74,14 +71,21 @@ fn launch(
     sessions: tauri::State<'_, Sessions>,
     mode: &str,
     target: Option<String>,
+    gesture: Option<String>,
 ) -> Result<u64, String> {
     let target = target
         .unwrap_or_else(|| "0".into())
         .parse::<u64>()
         .map_err(|_| "Invalid destination")?;
     let mut state = sessions.0.lock().map_err(|_| "Session state unavailable")?;
-    if state.child.is_some() {
-        return Err("Wait for the current recording to stop".into());
+    // Consume a global gesture once even when startup fails or is denied.
+    let permit = gesture
+        .as_deref()
+        .map(|id| crate::shortcut_gesture::GESTURES.claim(id))
+        .transpose()?;
+    state.require_idle()?;
+    if mode == "--recognizer" {
+        crate::permissions::require_microphone()?;
     }
     // Same lock order as model mutations: session lock, then mutation gate.
     // The worker slot is occupied before releasing this lock, so a file change
@@ -110,20 +114,22 @@ fn launch(
     if let Some(input) = input {
         command.env(crate::input_devices::WORKER_INPUT, input);
     }
-    let mut child = command
+    command
         .arg(mode)
         .arg(path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|_| "Could not start recognition")?;
+        .stderr(Stdio::null());
+    let mut child = crate::session_start::spawn(&mut command, permit.as_deref())?;
     let output = child.stdout.take().expect("piped worker stdout");
     state.generation += 1;
     let generation = state.generation;
     let child = Arc::new(Mutex::new(child));
     state.child = Some(child.clone());
     state.finishing = false;
+    state.hold = permit
+        .filter(|p| p.mode == crate::shortcut_gesture::Mode::Hold)
+        .map(|p| p.id);
     state.target = target;
     state.delivered = None;
     let sessions = sessions.inner().clone();
@@ -135,21 +141,5 @@ fn launch(
 
 #[tauri::command]
 pub fn stop_recording(sessions: tauri::State<'_, Sessions>) -> Result<(), String> {
-    let mut state = sessions.0.lock().map_err(|_| "Session state unavailable")?;
-    if state.finishing {
-        return Ok(());
-    }
-    let Some(child) = &state.child else {
-        return Ok(());
-    };
-    let mut child = child.lock().map_err(|_| "Worker unavailable")?;
-    child
-        .stdin
-        .as_mut()
-        .ok_or("Recognition connection closed")?
-        .write_all(b"finish\n")
-        .map_err(|_| "Could not stop recording; use Cancel")?;
-    drop(child);
-    state.finishing = true;
-    Ok(())
+    sessions.finish()
 }

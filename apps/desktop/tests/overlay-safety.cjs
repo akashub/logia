@@ -67,7 +67,7 @@ const { openFixture } = require('./native-fixture.cjs');
       state.delayShortcut = false; state.finishShortcut();
       await main.waitForFunction(() => JSON.parse(localStorage.getItem('logia.preferences.v1')).shortcut === 'Alt+Shift+Space');
       const prefs = await main.evaluate(() => JSON.parse(localStorage.getItem('logia.preferences.v1')));
-      assert.deepEqual(prefs, { shortcut: 'Alt+Shift+Space', theme: 'dark', position: 'top', showIdle: true });
+      assert.deepEqual(prefs, { shortcut: 'Alt+Shift+Space', shortcutMode: 'toggle', theme: 'dark', position: 'top', showIdle: true });
     });
     assert.deepEqual(failures, []);
   } finally { await browser.close(); }

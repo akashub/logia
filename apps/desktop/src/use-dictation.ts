@@ -5,6 +5,7 @@ import { useRecognition } from './use-recognition';
 import { activePhase, type Phase } from './dictation-types';
 import type { OverlayGate } from './use-overlay-bridge';
 import type { MutableRefObject } from 'react';
+import type { ShortcutMode, ShortcutRequest } from './shortcut-types';
 
 // How long the in-app voice test waits for a stalled panel reveal before
 // relying on the panel's own acknowledgment instead.
@@ -20,6 +21,8 @@ export function useDictation(native: boolean, overlayGate?: MutableRefObject<Ove
   const [copied, setCopied] = useState(false), [complete, setComplete] = useState(false);
   const [dismissed, setDismissed] = useState(true), [isDismissing, setDismissing] = useState(false);
   const [level, setLevel] = useState(0), [heardAudio, setHeardAudio] = useState(false);
+  const [recordingMode, setRecordingMode] = useState<ShortcutMode>('toggle');
+  const shortcutOwner = useRef<{ id: string; launched: boolean; released: boolean } | null>(null);
   const generation = useRef(0), controlIntent = useRef(0), recordingIntent = useRef(0);
   const shortcutStarting = useRef(false), dismissing = useRef(false);
   const phaseRef = useRef(phase); phaseRef.current = phase;
@@ -72,22 +75,31 @@ export function useDictation(native: boolean, overlayGate?: MutableRefObject<Ove
     return () => { cancelled = true; };
   }, [phase, complete, text, delivery.status]);
 
-  async function toggleFromShortcut() {
+  async function startFromShortcut(request: ShortcutRequest) {
     if (dismissing.current) return;
-    if (phaseRef.current === 'recording') { await stop(); return; }
-    if (phaseRef.current !== 'ready' || shortcutStarting.current) return;
+    if (phaseRef.current !== 'ready' || shortcutStarting.current || !request.valid()) return;
     shortcutStarting.current = true;
+    const owner = { id: request.id, launched: false, released: false };
+    shortcutOwner.current = owner;
     const intent = controlIntent.current;
     let target: CapturedTarget | undefined, started = false;
     try {
       target = await delivery.capture();
-      if (controlIntent.current !== intent) return;
-      started = await start(target);
-    } catch (e) { setError(String(e)); }
+      if (controlIntent.current !== intent || !request.valid()) return;
+      started = await start(target, request);
+      owner.launched = started;
+      if (started && owner.released && shortcutOwner.current === owner) await stop(true);
+    } catch (e) { if (request.valid()) setError(String(e)); }
     finally {
       if (target && !started) await delivery.discard(target.token).catch(() => {});
       shortcutStarting.current = false;
     }
+  }
+  async function releaseShortcut(id: string) {
+    const owner = shortcutOwner.current;
+    if (!owner || owner.id !== id) return;
+    owner.released = true;
+    if (owner.launched) await stop(true);
   }
   async function dismissWindow() {
     if (dismissing.current) return;
@@ -103,8 +115,14 @@ export function useDictation(native: boolean, overlayGate?: MutableRefObject<Ove
     if (activePhase(phaseRef.current)) { setError('Stop or cancel recording before dismissing Logia.'); return; }
     setDismissed(true); setError('');
   }
-  async function start(target?: CapturedTarget): Promise<boolean> {
+  async function start(target?: CapturedTarget, request?: ShortcutRequest): Promise<boolean> {
     if (!native || phaseRef.current !== 'ready' || dismissing.current) return false;
+    // A deliberate Voice test supersedes an older global start still waiting
+    // for reveal. Its completion may not revive that older recording intent.
+    if (!request) { controlIntent.current++; shortcutOwner.current = null; }
+    const beforeReveal = controlIntent.current;
+    const valid = () => !request || request.valid();
+    if (!valid()) return false;
     // claude 2026-09-11: the microphone must not open until the panel confirms
     // it is showing this session. Three rules make that safe:
     //
@@ -123,12 +141,14 @@ export function useDictation(native: boolean, overlayGate?: MutableRefObject<Ove
       const reveal = invoke('show_overlay').catch(e => { refused = String(e); });
       if (target) await reveal;
       else await Promise.race([reveal, new Promise(resolve => setTimeout(resolve, REVEAL_STALL_MS))]);
-      if (refused) { setError(refused); return false; }
-      if (phaseRef.current !== 'ready' || dismissing.current) return false;
+      if (refused) { if (valid()) setError(refused); return false; }
+      if (phaseRef.current !== 'ready' || dismissing.current || controlIntent.current !== beforeReveal || !valid()) return false;
     }
     controlIntent.current++; recordingIntent.current++;
     const intent = controlIntent.current;
     const baseline = gate ? gate.publishedSeq() : 0;
+    if (!request) shortcutOwner.current = null;
+    setRecordingMode(request?.mode ?? 'toggle');
     setError(''); setText(''); setComplete(false); setCopied(false); setSeconds(0); setLevel(0); setHeardAudio(false); setDismissed(false); transition('loading');
     delivery.setStatus(target?.status ?? 'copy');
     if (gate) {
@@ -138,25 +158,31 @@ export function useDictation(native: boolean, overlayGate?: MutableRefObject<Ove
       await gate.publishNow({ session: recordingIntent.current, phase: 'loading', dismissed: false,
         text: '', complete: false, error: '', seconds: 0, delivery: target?.status ?? 'copy' }).catch(() => {});
       const acknowledged = await gate.waitForApplied(baseline);
+      if (controlIntent.current !== intent) return false;
+      if (!valid()) { delivery.setStatus('copy'); setDismissed(true); transition('ready'); return false; }
       if (!acknowledged) {
         setError('The recording overlay did not appear, so nothing was recorded. Use these controls, or reopen Logia from the menu bar.');
         await invoke('show_main_window').catch(() => {});
         delivery.setStatus('copy'); setDismissed(true); transition('ready');
         return false;
       }
-      if (controlIntent.current !== intent) { delivery.setStatus('copy'); transition('ready'); return false; }
     }
     try {
-      generation.current = Math.max(generation.current, await invoke<number>('start_recording', { target: target?.token ?? null }));
+      generation.current = Math.max(generation.current, await invoke<number>('start_recording', { target: target?.token ?? null, gesture: request?.id ?? null }));
       return true;
-    } catch (e) { setError(String(e)); delivery.setStatus('copy'); transition('ready'); return false; }
+    } catch (e) {
+      if (controlIntent.current !== intent) return false;
+      if (valid()) setError(String(e)); else setDismissed(true);
+      delivery.setStatus('copy'); transition('ready'); return false;
+    }
   }
-  async function stop() {
-    if (phaseRef.current !== 'recording') return;
+  async function stop(whileLoading = false) {
+    if (phaseRef.current !== 'recording' && !(whileLoading && phaseRef.current === 'loading')) return;
     controlIntent.current++; setError(''); transition('finishing');
     try { await invoke('stop_recording'); } catch (e) { setError(String(e)); }
   }
   async function cancel() {
+    shortcutOwner.current = null;
     controlIntent.current++;
     const intent = recordingIntent.current;
     const preparing = phaseRef.current === 'warming';
@@ -197,7 +223,8 @@ export function useDictation(native: boolean, overlayGate?: MutableRefObject<Ove
     setText(value); setCopied(false); delivery.setStatus('copy');
   }
   function clear() { if (!activePhase(phaseRef.current)) { edit(''); setComplete(false); setDismissed(true); } }
-  return { phase, text, error, progress, seconds, copied, complete, dismissed, isDismissing, level, deaf,
+  return { phase, text, error, progress, seconds, copied, complete, dismissed, isDismissing, level, deaf, recordingMode,
     session: recordingIntent.current, delivery, active: activePhase(phase), setError,
-    toggleFromShortcut, dismissWindow, dismissOverlay, start, stop, cancel, download, prepare, copy, edit, clear };
+    currentPhase: () => phaseRef.current, startFromShortcut, releaseShortcut,
+    dismissWindow, dismissOverlay, start, stop, cancel, download, prepare, copy, edit, clear };
 }

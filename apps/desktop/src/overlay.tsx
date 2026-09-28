@@ -9,7 +9,7 @@ import './overlay.css';
 
 const initial: OverlaySnapshot = { seq: 0, session: 0, phase: 'checking', text: '', complete: false, error: '',
   seconds: 0, delivery: 'copy', copied: false, dismissed: true, shortcut: '', position: 'bottom', showIdle: true,
-  level: 0, deaf: false };
+  level: 0, deaf: false, shortcutMode: 'toggle' };
 
 export function Overlay() {
   const [state, setState] = useState(initial), [connectionError, setConnectionError] = useState('');
@@ -127,6 +127,7 @@ export function Overlay() {
         </span>}
         <span role="status" className={state.deaf ? 'overlay-deaf' : undefined}>{state.deaf
           ? 'No input'
+          : state.phase === 'recording' && state.shortcutMode === 'hold' ? (rung === 'armed' || compactSpeaking ? 'Hold' : 'Release to finish')
           : rung === 'armed' && state.phase === 'recording' ? (state.delivery === 'armed' ? 'Listening' : 'Copy only') : label}</span>
         <span className="overlay-clock">{state.phase !== 'loading' && state.phase !== 'warming' ? `${Math.floor(state.seconds / 60)}:${String(state.seconds % 60).padStart(2, '0')}` : ''}</span>
         <span className="overlay-spacer" />
@@ -143,7 +144,7 @@ export function Overlay() {
         <button className="overlay-copy" disabled={!state.text} onClick={() => action('copy')}>{state.copied ? 'Copied' : 'Copy again'}</button>
         {state.delivery === 'permission' && <button className="overlay-permission" onClick={() => action('permissions')}>Accessibility settings</button>}
         <span className="overlay-spacer" />
-        <span className="overlay-hint">{state.shortcut} to dictate again</span>
+        <span className="overlay-hint">{state.shortcutMode === 'hold' ? 'Hold ' : ''}{state.shortcut} to dictate again</span>
         <button className="overlay-close" aria-label="Close recovery" title="Close" onClick={() => action('dismiss')}>×</button>
       </div>}
     </section>

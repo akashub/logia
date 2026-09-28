@@ -3,12 +3,13 @@ export type Preferences = {
   showIdle: boolean;
   theme: 'light' | 'dark';
   shortcut: string;
+  shortcutMode: 'toggle' | 'hold';
 };
 type PreferenceStorage = Pick<Storage, 'getItem' | 'setItem'>;
 const key = 'logia.preferences.v1';
 // claude 2026-09-11: the panel appears when you ask for it. A dot sitting on
 // screen all day is ambient clutter, not feedback.
-const defaults: Preferences = { position: 'bottom', showIdle: false, theme: 'light', shortcut: 'Control+Alt+Space' };
+const defaults: Preferences = { position: 'bottom', showIdle: false, theme: 'light', shortcut: 'Control+Alt+Space', shortcutMode: 'toggle' };
 const supportedShortcuts = ['Control+Alt+Space', 'Control+Shift+Space', 'Alt+Shift+Space'];
 
 function validated(value: unknown): Preferences {
@@ -20,6 +21,7 @@ function validated(value: unknown): Preferences {
     showIdle: typeof fields.showIdle === 'boolean' ? fields.showIdle : defaults.showIdle,
     theme: fields.theme === 'dark' ? 'dark' : 'light',
     shortcut,
+    shortcutMode: fields.shortcutMode === 'hold' ? 'hold' : 'toggle',
   };
 }
 
